@@ -57,6 +57,13 @@ Status values: `todo`, `partial: <what is missing>`, `done`, `n/a: <reason and w
 | `OpenCode/Core/Theme/ThemePalette+Generated.swift` | 397 | see core-ui.md | — | |
 | `OpenCode/Core/TouchRecovery.swift` | 349 | — | n/a: Android-native on purpose | Android had one owner, the + menu's hand-built surface; the menu is now a Material `DropdownMenu` (composer.md), which leaves with its popup, so there is no invisible catcher to retire. The others are n/a too: `browser` (the page stack has no gesture of its own), `transcript`, `zoom`, `drawer`/`catch_up`, `call_orb`, `sheet` (M3 sheets are dismissed with their state), `keyboard_composer` (Android's IME can't host app surfaces). |
 
+## Android-only: assistant
+
+Android-only, approved divergence (iOS can't replace Siri): OpenCode as the phone's assistant app, held on the side button. Behind Settings › Experimental › Android › Assistant (off by default; an Android-only switch outside the iOS `ExperimentalFeature` enum, so the ported experiment tests still match iOS).
+
+- `experiments/AssistantExperiment.kt`: the switch's key (`experimental-assistant`), title and symbol; the assistant's session choice (`SessionChoice`: new, recent, pinned; `assistant-session-choice`, default new), the pinned session (`assistant-pinned-session`, its title and `assistant-pinned-session-missing`), the Without Asking switches (calls, texts, notifications; all off) Phone Tools reach (`assistant-phone-tools-in-all-calls`, off: assistant calls only) and whether the side button has opened the assistant (`assistant-side-button-used`, off; set by the assistant session, read by Settings where the side button setting can't be).
+- `log/CallTrigger.kt`: `SystemActionOrigin.sideButton` (“side button (OpenCode as the assistant)”).
+
 ## Tests
 
 Ported from iOS `OpenCodeTests/` into `core/src/test` (JVM, same names). Shared fixtures:

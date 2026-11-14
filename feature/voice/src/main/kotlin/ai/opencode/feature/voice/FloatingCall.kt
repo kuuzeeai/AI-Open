@@ -1044,7 +1044,7 @@ private class FloatingCallSurfaceModel(
     }
 }
 
-private fun floatingCallMood(state: VoiceFeature.State): FloatingCallMood = when (state.phase) {
+internal fun floatingCallMood(state: VoiceFeature.State): FloatingCallMood = when (state.phase) {
     VoiceFeature.State.Phase.Connecting -> FloatingCallMood.connecting
     VoiceFeature.State.Phase.Ended, VoiceFeature.State.Phase.Dropped, is VoiceFeature.State.Phase.Failed -> FloatingCallMood.ended
     else -> when {
@@ -1726,7 +1726,7 @@ private fun FloatingCallOrbControls(isMuted: Boolean, statusText: String, reduce
 
 /** The capsule's End: a red circle in a full touch target. */
 @Composable
-private fun FloatingCallEndButton(diameter: Float, isEnabled: Boolean, onEnd: () -> Unit, modifier: Modifier = Modifier) {
+internal fun FloatingCallEndButton(diameter: Float, isEnabled: Boolean, onEnd: () -> Unit, modifier: Modifier = Modifier) {
     val endDescription = stringResource(R.string.voice_floating_end_description)
     Box(
         modifier

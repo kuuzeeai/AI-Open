@@ -1,6 +1,7 @@
 package ai.opencode.feature.drawer
 
 import ai.opencode.core.log.CallTrigger
+import ai.opencode.core.log.SystemActionOrigin
 import ai.opencode.feature.session.*
 import ai.opencode.core.dependencies.dependency
 import ai.opencode.core.haptics.Haptic
@@ -210,7 +211,7 @@ internal fun HomeFeature.openSystemDestination(
 ): HomeReduced {
     var s = state.copy(settings = null)
     val session: OpenCodeSession? = when (destination) {
-        is SystemAction.Destination.Session -> s.sessions.firstOrNull { it.id == destination.id } ?: return Reduced(s)
+        is SystemAction.Destination.Session -> s.sessions.firstOrNull { it.id == destination.id } ?: destination.loaded ?: return Reduced(s)
         SystemAction.Destination.LastViewed -> s.lastViewedOrNewestSession
         is SystemAction.Destination.Draft -> null
     }
@@ -261,7 +262,11 @@ internal fun HomeFeature.startSystemCall(state: State, inBackground: Boolean = f
     if (s.sessionDetail?.voice != null) return Reduced(s)
     if (!detail.isVoiceAvailable) return Reduced(s.showingSettings())
     trigger.log()
-    val tapped = Effect.send<Action>(Action.detail(SessionFeature.Action.VoiceTapped))
+    var tapped = Effect.send<Action>(Action.detail(SessionFeature.Action.VoiceTapped))
+    // Android: a side-button call delegates straight into this session, which holds the phone's tools.
+    if (trigger == CallTrigger.System(SystemActionOrigin.sideButton)) {
+        tapped = Effect.concatenate(tapped, Effect.send(Action.detail(SessionFeature.Action.voicePresented(VoiceFeature.Action.AssistantCallMarked))))
+    }
     if (!inBackground) return Reduced(s, tapped)
     return Reduced(s, Effect.concatenate(tapped, Effect.send(Action.detail(SessionFeature.Action.voicePresented(VoiceFeature.Action.StartIfNeeded)))))
 }

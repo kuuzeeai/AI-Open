@@ -198,6 +198,16 @@ object SceneWindows {
     }
 
     internal val all: List<RootStore> get() = windows
+
+    /** The window whose call the assistant panel shows: the call's own window, else the app-wide one. */
+    internal val assistantWindow: RootStore?
+        get() {
+            val owner = callOwner?.get()
+            if (owner != null && owner.isResolved) return owner
+            val appWide = roster.appWideOwner as? RootStore
+            if (appWide != null && appWide.isResolved) return appWide
+            return null
+        }
 }
 
 /**

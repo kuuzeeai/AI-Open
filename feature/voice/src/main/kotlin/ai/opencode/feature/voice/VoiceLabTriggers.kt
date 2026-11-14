@@ -26,6 +26,15 @@ enum class VoiceLabTrigger(val rawValue: String) {
      */
     requestScreen("ai.opencode.lab.voice-request-screen"),
     openLink("ai.opencode.lab.voice-open-link"),
+
+    /**
+     * Android only: the call's `read_screen` phone tool, run from wherever the user is, so the
+     * emulator can read the screen outside the app without a server (`PhoneToolLab` in `:app`).
+     */
+    readScreen("ai.opencode.lab.phone-read-screen"),
+
+    /** Android only: any phone tool, named by the broadcast's `tool` extra with its `args` JSON (`PhoneToolLab` in `:app`). */
+    phoneTool("ai.opencode.lab.phone-tool"),
     ;
 
     /** `Notification.Name("OpenCodeLab." + rawValue)`. */

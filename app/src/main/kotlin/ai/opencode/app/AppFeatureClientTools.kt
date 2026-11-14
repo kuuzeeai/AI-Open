@@ -1,5 +1,6 @@
 package ai.opencode.app
 
+import ai.opencode.core.dependencies.Clock
 import ai.opencode.core.dependencies.dependency
 import ai.opencode.core.log.AppLog
 import ai.opencode.core.store.Effect
@@ -13,7 +14,11 @@ import ai.opencode.core.store.scope
 import ai.opencode.feature.drawer.HomeFeature
 import ai.opencode.feature.session.SessionFeature
 import ai.opencode.feature.system.clienttools.ClientToolsFeature
+import ai.opencode.feature.voice.AssistantPanelClient
 import ai.opencode.feature.voice.CallAudioFailure
+import ai.opencode.feature.voice.PhoneTools
+import ai.opencode.feature.voice.PhoneToolsClient
+import ai.opencode.feature.voice.PhoneToolsRunner
 import ai.opencode.feature.voice.VoiceCallAudioFeature
 import ai.opencode.feature.voice.VoiceFeature
 import ai.opencode.feature.voice.VoiceOpenLinkFeature
@@ -23,10 +28,60 @@ import ai.opencode.feature.voice.sessionDelegatorElsewhereID
 import ai.opencode.server.OpenCodeClient
 import ai.opencode.server.clienttools.ClientTool
 import ai.opencode.server.clienttools.ClientToolCall
+import ai.opencode.server.clienttools.ClientToolResult
+import ai.opencode.server.clienttools.ClientToolsClient
 import ai.opencode.server.clienttools.ClientToolsTarget
+import ai.opencode.server.clienttools.JsonRpcID
+import ai.opencode.server.clienttools.PhoneToolSpecs
+import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.time.Duration.Companion.seconds
 
 // The phone's client tools, all for a live call.
+
+/**
+ * Android only: the session the side-button assistant talks to, while its panel is open
+ * ([isOpen]) and after, until that session's turn finishes ([inGrace] covers the moment before
+ * the turn starts).
+ */
+data class AssistantScope(
+    val sessionID: String,
+    val directory: String,
+    val isOpen: Boolean = true,
+    val inGrace: Boolean = false,
+)
+
+/** How long the phone's tools stay offered after the panel closes, before the session's turn has started. */
+private val assistantGrace = 20.seconds
+
+private enum class AssistantGraceID { Grace }
+
+/** The phone's tools: only the assistant's session may run them. */
+internal val phoneClientTools: Set<ClientTool> = ClientTool.entries.filter { it.isPhoneTool }.toSet()
+
+/**
+ * Android only: the session the phone's tools serve. A live side-button call's session (or, under
+ * Phone Tools › All Calls, any live call's), or the panel's while it's open, after it closes for
+ * [assistantGrace], and for as long as that session is still working.
+ */
+internal val AppFeature.State.assistantSession: AssistantScope?
+    get() {
+        val home = home ?: return null
+        val voice = home.sessionDetail?.voice
+        if (voice != null && voice.isAssistantCall && !voice.phase.isTerminal) {
+            val id = voice.target.sessionID ?: return null
+            return AssistantScope(id, voice.target.directory)
+        }
+        val scope = assistantScope
+        val panelIsUp = scope != null && (scope.isOpen || scope.inGrace)
+        if (phoneToolsInAllCalls && !panelIsUp && voice != null && !voice.phase.isTerminal) {
+            val id = voice.target.sessionID ?: return null
+            return AssistantScope(id, voice.target.directory)
+        }
+        if (scope == null) return null
+        if (scope.isOpen || scope.inGrace || scope.sessionID in home.busySessionIDs) return scope
+        return null
+    }
 
 /** The directory a call's delegator session lives in, read from the server. */
 data class ClientToolsLocation(val sessionID: String, val directory: String)
@@ -38,11 +93,19 @@ internal val AppFeature.State.clientToolsTarget: ClientToolsTarget?
     get() {
         // Keep the reply's socket through retargeting and until its reply is sent.
         if (voiceOpenSession.inFlight) return clientTools.target
-        val tools = offeredClientTools
-        if (tools.isEmpty()) return null
         val home = home ?: return null
-        val voice = home.sessionDetail?.voice ?: return null
-        if (voice.phase.isTerminal) return null
+        val assistant = assistantSession
+        val voice = home.sessionDetail?.voice
+        if (voice == null || voice.phase.isTerminal) {
+            // Android: no call, but the assistant's session can still reach the phone's tools.
+            if (assistant == null) return null
+            return ClientToolsTarget(home.server, assistant.directory, phoneClientTools)
+        }
+        var tools = offeredClientTools
+        if (assistant != null && assistant.directory == voice.target.directory) {
+            tools = tools + phoneClientTools
+        }
+        if (tools.isEmpty()) return null
         return ClientToolsTarget(home.server, voice.target.directory, tools)
     }
 
@@ -217,6 +280,13 @@ internal fun sharingScreenWithAgents(base: Reducer<AppFeature.State, AppFeature.
             if (state.voiceOpenSession.active == null) Reduced(state)
             else Reduced(state, Effect.send(AppFeature.Action.VoiceOpenSession(VoiceOpenSessionFeature.Action.EnvironmentChanged)))
         }
+        .onChange({ it.assistantSession }) { _, session, state ->
+            // A turn that finished after the panel closed: forget the session.
+            val scope = state.assistantScope
+            if (session == null && scope != null && !scope.isOpen && !scope.inGrace) Reduced(state.copy(assistantScope = null))
+            else Reduced(state)
+        }
+        .onChange({ it.assistantSession?.sessionID }) { old, new, state -> assistantInstruction(old, new, state) }
         .onChange({ it.clientToolsTarget }) { _, target, state ->
             Reduced(state, Effect.send(AppFeature.Action.ClientTools(ClientToolsFeature.Action.TargetChanged(target))))
         }
@@ -224,6 +294,34 @@ internal fun sharingScreenWithAgents(base: Reducer<AppFeature.State, AppFeature.
         .onChange({ it.delegatorClientToolsTarget }) { _, target, state ->
             Reduced(state, Effect.send(AppFeature.Action.DelegatorClientTools(ClientToolsFeature.Action.TargetChanged(target))))
         }
+}
+
+/**
+ * Android only: tells the assistant's session it's talking to the phone (the spec's session
+ * instruction entry), and takes it back from the session it stops talking to. Best effort: an older
+ * server without the endpoint just doesn't get it.
+ */
+private fun assistantInstruction(old: String?, new: String?, state: AppFeature.State): Reduced<AppFeature.State, AppFeature.Action> {
+    val server = state.home?.server ?: return Reduced(state)
+    val client = dependency(OpenCodeClient)
+    return Reduced(
+        state,
+        Effect.run {
+            // [done] is the log's verb: "removed" or "set".
+            suspend fun setInstruction(sessionID: String, instruction: String?, done: String) {
+                try {
+                    client.setSessionInstruction(server, sessionID, PhoneToolSpecs.INSTRUCTION_KEY, instruction)
+                    AppLog.app.info { "Assistant instruction $done session=$sessionID" }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    AppLog.app.notice { "Assistant instruction not $done session=$sessionID" }
+                }
+            }
+            if (old != null) setInstruction(old, null, "removed")
+            if (new != null) setInstruction(new, PhoneToolSpecs.INSTRUCTION, "set")
+        },
+    )
 }
 
 /** The voice open Home handles this action for, when App's operation still authorizes it. */
@@ -317,6 +415,26 @@ private fun routingClientTools(state: AppFeature.State, action: AppFeature.Actio
             AppFeature.Action.DelegatorClientTools(ClientToolsFeature.Action.Refuse(call, message))
         })
     }
+    if (action is AppFeature.Action.AssistantPanelChanged) {
+        val scope = action.scope
+        if (scope != null) return Reduced(state.copy(assistantScope = scope), Effect.cancel(AssistantGraceID.Grace))
+        val current = state.assistantScope ?: return Reduced(state)
+        val clock = dependency(Clock)
+        val grace = Effect.run<AppFeature.Action> { send ->
+            clock.sleep(assistantGrace)
+            send(AppFeature.Action.AssistantGraceElapsed)
+        }.cancellable(AssistantGraceID.Grace, cancelInFlight = true)
+        return Reduced(state.copy(assistantScope = current.copy(isOpen = false, inGrace = true)), grace)
+    }
+    if (action is AppFeature.Action.PhoneToolsReachChanged) {
+        if (action.allCalls == state.phoneToolsInAllCalls) return Reduced(state)
+        AppLog.app.info { "Phone tools reach allCalls=${action.allCalls}" }
+        return Reduced(state.copy(phoneToolsInAllCalls = action.allCalls))
+    }
+    if (action is AppFeature.Action.AssistantGraceElapsed) {
+        val current = state.assistantScope ?: return Reduced(state)
+        return Reduced(state.copy(assistantScope = current.copy(inGrace = false)))
+    }
     if (action is AppFeature.Action.VoiceDelegatorLocated) {
         if (action.location.sessionID != state.voiceDelegatorSessionID) return Reduced(state)
         return Reduced(state.copy(voiceDelegatorLocation = action.location))
@@ -345,6 +463,9 @@ private fun route(
             Effect.send(voiceAction(VoiceFeature.Action.ScreenRequest(VoiceScreenRequestFeature.Action.ConnectionClosed(delegate.connection)))),
             Effect.send(voiceAction(VoiceFeature.Action.OpenLink(VoiceOpenLinkFeature.Action.ConnectionClosed(delegate.connection)))),
         )
+    }
+    if (delegate is ClientToolsFeature.DelegateAction.Cancelled) {
+        return Effect.cancel(PhoneToolCallID(delegate.connection, delegate.requestID))
     }
     val call = (delegate as ClientToolsFeature.DelegateAction.ToolCalled).call
     val isLive = state.home?.sessionDetail?.voice?.phase == VoiceFeature.State.Phase.Live
@@ -376,8 +497,38 @@ private fun route(
             if (!isLive) return Effect.send(refuse(call, CallAudioFailure.NoCall.message))
             return Effect.send(voiceAction(VoiceFeature.Action.CallAudio(VoiceCallAudioFeature.Action.ControlRequested(call))))
         }
+        else -> return phoneTool(call, state, refuse)
     }
 }
+
+/**
+ * Android only: runs one of the phone's tools for the assistant's session. The server offers the
+ * tools to every session on the directory, so another session's calls (or a call for a session
+ * the panel no longer serves) are refused here.
+ */
+private fun phoneTool(
+    call: ClientToolCall,
+    state: AppFeature.State,
+    refuse: (ClientToolCall, String) -> AppFeature.Action,
+): Effect<AppFeature.Action> {
+    val assistant = state.assistantSession
+    if (assistant == null || call.sessionID != assistant.sessionID) return Effect.send(refuse(call, PhoneTools.NOT_HERE))
+    val clientTools = dependency(ClientToolsClient)
+    val phoneTools = dependency(PhoneToolsClient)
+    val panel = dependency(AssistantPanelClient)
+    val clock = dependency(Clock)
+    val callID = call.toolCallID ?: call.id.json.content
+    return Effect.run<AppFeature.Action> {
+        val result = PhoneToolsRunner.run(call.tool.rawValue, call.arguments, callID, phoneTools, panel, clock)
+        val content = mutableListOf<ClientToolResult.Content>(ClientToolResult.Content.Text(result.text))
+        val jpeg = result.jpeg
+        if (jpeg != null) content.add(ClientToolResult.Content.Jpeg(jpeg))
+        clientTools.reply(call, ClientToolResult(content, isError = result.isError))
+    }.cancellable(PhoneToolCallID(call.connection, call.id))
+}
+
+/** One phone tool call, so the server's `notifications/cancelled` stops it (and takes its card down). */
+private data class PhoneToolCallID(val connection: UUID, val requestID: JsonRpcID)
 
 /** Reads where the delegator's session lives (one GET per session per call). */
 private fun locateVoiceDelegator(state: AppFeature.State): Reduced<AppFeature.State, AppFeature.Action> {

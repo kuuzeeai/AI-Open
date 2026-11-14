@@ -58,5 +58,48 @@
                 <data android:path="/pair/" />
             </intent-filter>
         </activity>
+
+        <!--
+            Android only: OpenCode as the phone's assistant (holding the side button). The
+            system binds the service while OpenCode holds the assistant role; each press opens a
+            session, which hands off to the panel. The recognition service is the stub the
+            platform requires of an assistant; it can't be picked as the phone's speech service.
+        -->
+        <service
+            android:name=".assistant.OpenCodeAssistantService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <meta-data
+                android:name="android.voice_interaction"
+                android:resource="@xml/assistant_service" />
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".assistant.OpenCodeAssistantSessionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION" />
+        <service
+            android:name=".assistant.OpenCodeRecognitionService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.speech"
+                android:resource="@xml/assistant_recognition" />
+        </service>
+        <activity
+            android:name=".assistant.AssistantActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.OpenCode.SystemDialog" />
     </application>
 </manifest>

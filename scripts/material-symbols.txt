@@ -8,6 +8,7 @@ add_circle                          # plus.circle
 add_photo_alternate                 # photo.badge.plus
 add_to_queue                        # macwindow.badge.plus
 adjust                              # button.programmable
+alarm                               # alarm
 all_inbox                           # tray.full
 all_inbox fill                      # tray.full.fill
 alternate_email                     # at
@@ -224,6 +225,7 @@ tag                                 # number
 terminal                            # apple.terminal, terminal
 text_format                         # textformat
 text_select_start                   # selection.pin.in.out, character.cursor.ibeam, text.cursor
+timer                               # timer
 toggle_off                          # capsule
 toggle_on                           # switch.2
 touch_app                           # hand.tap

@@ -58,6 +58,7 @@ import ai.opencode.server.live.requestServerCapabilities
 import ai.opencode.server.live.requestSessionFamily
 import ai.opencode.server.live.requestSetAlwaysNotify
 import ai.opencode.server.live.requestSetMCPConnected
+import ai.opencode.server.live.requestSetSessionInstruction
 import ai.opencode.server.live.requestSetPendingInputDelivery
 import ai.opencode.server.live.requestShell
 import ai.opencode.server.live.requestShellOutput
@@ -218,6 +219,11 @@ data class OpenCodeClient(
     /** Settings › Developer › Server Details: MCP servers, skills, and sign-ins for the server's own location. */
     val serverCapabilities: suspend (server: OpenCodeServer) -> OpenCodeServerCapabilities,
     val setMCPConnected: suspend (server: OpenCodeServer, name: String, connected: Boolean) -> Unit,
+    /**
+     * Android only (the assistant): sets a session instruction entry, or removes it when [value] is
+     * null (`PUT`/`DELETE /api/experimental/session/{id}/instructions/entries/{key}`).
+     */
+    val setSessionInstruction: suspend (server: OpenCodeServer, sessionID: String, key: String, value: String?) -> Unit,
     val startIntegrationOAuth: suspend (server: OpenCodeServer, integrationID: String) -> OpenCodeOAuthAttempt,
     val integrationOAuthStatus: suspend (server: OpenCodeServer, integrationID: String, attemptID: String) -> OpenCodeOAuthStatus,
     val completeIntegrationOAuth: suspend (server: OpenCodeServer, integrationID: String, attemptID: String, code: String) -> Unit,
@@ -327,6 +333,7 @@ data class OpenCodeClient(
             historyPage = ::requestHistoryPage,
             serverCapabilities = ::requestServerCapabilities,
             setMCPConnected = ::requestSetMCPConnected,
+            setSessionInstruction = ::requestSetSessionInstruction,
             startIntegrationOAuth = ::requestStartIntegrationOAuth,
             integrationOAuthStatus = ::requestIntegrationOAuthStatus,
             completeIntegrationOAuth = ::requestCompleteIntegrationOAuth,
@@ -406,6 +413,7 @@ data class OpenCodeClient(
                     historyPage = { _, _, _ -> unimplemented("historyPage") },
                     serverCapabilities = { OpenCodeServerCapabilities.empty },
                     setMCPConnected = { _, _, _ -> },
+                    setSessionInstruction = { _, _, _, _ -> },
                     startIntegrationOAuth = { _, _ -> throw OpenCodeClientError("Unstubbed") },
                     integrationOAuthStatus = { _, _, _ -> OpenCodeOAuthStatus.Pending },
                     completeIntegrationOAuth = { _, _, _, _ -> },

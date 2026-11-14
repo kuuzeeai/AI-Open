@@ -100,7 +100,7 @@ class VoiceTimeline : Reducer<VoiceFeature.State, VoiceFeature.Action> {
                 if (ends && state.callAudio.track != null) mark("voice_audio_stopped")
             }
             is VoiceFeature.Action.CallRouteResolved -> action.note?.let { mark("voice_delegator_fallback", it) }
-            VoiceFeature.Action.StartIfNeeded, VoiceFeature.Action.TryAgainTapped, VoiceFeature.Action.EndPressed, VoiceFeature.Action.ReconnectingShown,
+            VoiceFeature.Action.StartIfNeeded, VoiceFeature.Action.AssistantCallMarked, VoiceFeature.Action.TryAgainTapped, VoiceFeature.Action.EndPressed, VoiceFeature.Action.ReconnectingShown,
             is VoiceFeature.Action.SessionRenamed,
             is VoiceFeature.Action.CompactionObserved, is VoiceFeature.Action.DelegatorExplained, is VoiceFeature.Action.DelegatorPinned,
             is VoiceFeature.Action.DelegatorOpenedDraft, VoiceFeature.Action.DelegatorRequestedEnd, is VoiceFeature.Action.DelegatorSettledRequest,

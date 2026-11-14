@@ -211,6 +211,8 @@ data class LiveSessionConfig(
      * without an active `delegation_id`.
      */
     val unboundSpeechUsesInstructions: Boolean = false,
+    /** Android only: an assistant (side button) call, whose safety net also listens for phone phrases. */
+    val phoneClaims: Boolean = false,
 ) {
     fun sessionStart(eventID: String = "event_start"): RealtimeJSON = RealtimeJSONs.obj(
         "type" to RealtimeJSONs.string("session.start"),

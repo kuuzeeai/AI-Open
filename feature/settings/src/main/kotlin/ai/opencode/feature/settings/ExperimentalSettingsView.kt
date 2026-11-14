@@ -1,6 +1,7 @@
 package ai.opencode.feature.settings
 
 import ai.opencode.core.experiments.key
+import ai.opencode.core.experiments.AssistantExperiment
 import ai.opencode.core.experiments.ExperimentalFeature
 import ai.opencode.core.experiments.ExperimentalGroup
 import ai.opencode.core.motion.MotionPhase
@@ -49,6 +50,7 @@ fun ExperimentalSettingsView(store: SettingsStore, focus: ExperimentalFeature?) 
         remember(feature) { shared(feature.key).flow }.collectAsState().value
     }
     val all by remember { shared(AllExperiments.key).flow }.collectAsState()
+    val assistant by remember { shared(AssistantExperiment.key).flow }.collectAsState()
     val send = { action: HomeSettingsFeature.Action -> store.send(SettingsFeature.Action.Settings(action)) }
     val listState = rememberLazyListState()
     var highlighted by remember { mutableStateOf<ExperimentalFeature?>(null) }
@@ -121,6 +123,20 @@ fun ExperimentalSettingsView(store: SettingsStore, focus: ExperimentalFeature?) 
         settingsSection(key = ExperimentalGroup.transcript, header = header(ExperimentalGroup.transcript)) {
             toggles(ExperimentalGroup.transcript, leadingDivider = false)
         }
+        // Android only, outside iOS's groups (and All Experiments, since it reads the screen).
+        settingsSection(
+            key = "android",
+            header = "Android",
+            footer = footerText("Hold the side button to talk to OpenCode. Set it up in Settings › Assistant."),
+        ) {
+            SettingsToggleRow(
+                title = AssistantExperiment.TITLE,
+                checked = assistant,
+                onCheckedChange = { send(HomeSettingsFeature.Action.AssistantExperimentChanged(it)) },
+                symbol = AssistantExperiment.SYMBOL,
+                tint = SettingsTint.Indigo,
+            )
+        }
     }
 }
 
@@ -165,6 +181,8 @@ fun ExperimentalSettingsRow(modifier: Modifier = Modifier, onClick: () -> Unit) 
     for ((index, feature) in features.withIndex()) {
         if (enabled[index]) on += 1
     }
+    val assistant by remember { shared(AssistantExperiment.key).flow }.collectAsState()
+    if (assistant) on += 1
     val badge = if (all) stringResource(R.string.settings_experimental_all_on) else if (on == 0) null else pluralStringResource(R.plurals.settings_experimental_on_count, on, on)
     SettingsRow(stringResource(R.string.settings_experimental_title), "flask.fill", SettingsTint.Gray, modifier = modifier, badge = badge, onClick = onClick)
 }

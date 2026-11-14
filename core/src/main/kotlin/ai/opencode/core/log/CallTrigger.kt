@@ -69,6 +69,8 @@ enum class SystemActionOrigin {
     control,
     /** A launcher quick action (long-press on the app icon). */
     quickAction,
+    /** Android only: holding the side button with OpenCode as the phone's assistant. */
+    sideButton,
     /** Links, search, entities. */
     other,
     ;
@@ -79,6 +81,7 @@ enum class SystemActionOrigin {
             backgroundShortcut -> "Start Voice Call in Background shortcut"
             control -> "Quick Settings tile or widget control"
             quickAction -> "launcher quick action"
+            sideButton -> "side button (OpenCode as the assistant)"
             other -> "system action"
         }
 }

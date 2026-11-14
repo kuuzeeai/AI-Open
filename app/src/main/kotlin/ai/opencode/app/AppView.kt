@@ -10,6 +10,7 @@ import ai.opencode.core.ui.OpenCodeRadius
 import androidx.compose.foundation.BorderStroke
 import ai.opencode.core.dependencies.dependency
 import ai.opencode.core.diagnostics.HidesFromScreenshots
+import ai.opencode.core.experiments.AssistantExperiment
 import ai.opencode.core.experiments.key
 import ai.opencode.core.motion.MotionRole
 import ai.opencode.core.motion.rememberReduceMotion
@@ -174,6 +175,12 @@ fun AppView(store: StoreOf<AppFeature.State, AppFeature.Action>) {
     val clientTools = clientTools(shareScreenWithAgents)
     LaunchedEffect(store, clientTools) {
         store.send(AppFeature.Action.ClientTools(ClientToolsFeature.Action.ToolsChanged(clientTools)))
+    }
+    val assistantOn by remember { shared(AssistantExperiment.key).flow }.collectAsState()
+    val phoneToolsInAllCalls by remember { shared(AssistantExperiment.phoneToolsInAllCalls).flow }.collectAsState()
+    val allCalls = assistantOn && phoneToolsInAllCalls
+    LaunchedEffect(store, allCalls) {
+        store.send(AppFeature.Action.PhoneToolsReachChanged(allCalls))
     }
     OpenCodeAppTheme {
         // Media's file viewer renders Markdown files with the transcript's renderer.

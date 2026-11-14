@@ -227,7 +227,7 @@ internal fun VoiceDelegatorSettingsPage(store: SettingsStore) {
 }
 
 @Composable
-private fun DelegatorNote(text: String, symbol: SFSymbol, color: androidx.compose.ui.graphics.Color) {
+internal fun DelegatorNote(text: String, symbol: SFSymbol, color: androidx.compose.ui.graphics.Color) {
     SettingsRowFrame {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
             OpenCodeIcon(symbol, contentDescription = null, size = 18.dp, tint = color)
@@ -237,7 +237,7 @@ private fun DelegatorNote(text: String, symbol: SFSymbol, color: androidx.compos
 }
 
 @Composable
-private fun ModeRow(
+internal fun ModeRow(
     title: String,
     subtitle: String? = null,
     isSelected: Boolean,
@@ -269,7 +269,7 @@ private fun ModeRow(
     }
 }
 
-private fun lastPathComponent(path: String): String {
+internal fun lastPathComponent(path: String): String {
     val trimmed = path.trimEnd('/')
     if (trimmed.isEmpty()) return if (path.isEmpty()) "" else "/"
     return trimmed.substringAfterLast('/')

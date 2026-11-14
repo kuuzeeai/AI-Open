@@ -8,6 +8,7 @@ import androidx.annotation.DrawableRes
  * `scripts/fetch-material-symbols.py`, an entry here and a parity row.
  */
 enum class SFSymbol(val sfName: String, @DrawableRes val drawable: Int) {
+    Alarm("alarm", R.drawable.ms_alarm),
     AntennaRadiowavesLeftAndRight("antenna.radiowaves.left.and.right", R.drawable.ms_cell_tower),
     AntennaRadiowavesLeftAndRightSlash("antenna.radiowaves.left.and.right.slash", R.drawable.ms_signal_disconnected),
     App("app", R.drawable.ms_square),
@@ -260,6 +261,7 @@ enum class SFSymbol(val sfName: String, @DrawableRes val drawable: Int) {
     TextWordSpacing("text.word.spacing", R.drawable.ms_wrap_text),
     Textformat("textformat", R.drawable.ms_text_format),
     TextformatSize("textformat.size", R.drawable.ms_format_size),
+    Timer("timer", R.drawable.ms_timer),
     TortoiseFill("tortoise.fill", R.drawable.ms_slow_motion_video),
     Trash("trash", R.drawable.ms_delete),
     Tray("tray", R.drawable.ms_inbox),

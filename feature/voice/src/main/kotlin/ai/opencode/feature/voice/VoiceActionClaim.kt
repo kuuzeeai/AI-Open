@@ -48,6 +48,50 @@ object VoiceActionClaim {
 
     private fun startsWithGerund(clause: String): Boolean = gerunds.any { clause.startsWith("$it ") }
 
+    // Android only (assistant calls): phone actions said without a delegation behind them, from
+    // the GPT-Live → session → phone eval (shots/assistant/eval/round2, `claims.py`).
+    private val phoneGerunds = listOf(
+        "setting", "counting", "turning", "waking", "reading", "launching", "calling", "texting", "cancelling", "canceling", "running",
+    )
+    private val phoneVerbs = listOf("set", "turn", "wake", "read", "launch", "call", "text", "cancel", "remind")
+    private val phoneAnywhere = Regex("""\b(one sec|one second|one moment|hang on|hold on|coming up|let's ask|asking (it|you|for|to))\b""")
+    private val phoneOutcome = Regex(
+        """\b(timer|alarm|it|that|it's|that's|spotify's|camera's|session's)\s*(is\s+|'s\s+)?(set|up|open|opened|on|started|running|cancell?ed|done)\b""" +
+            """|^\s*(done|all set)\b|\bi got you\b""",
+    )
+
+    /**
+     * Android only: an assistant call's claim check. The usual phrases plus phone verbs, holds
+     * ("one sec") and phone outcomes ("it's set"), sentence by sentence so a long reply can't hide
+     * a claim at its start. The caller fires only when the user spoke after the last delegation,
+     * so a relayed result ("Done, the alarm is set") never starts another one.
+     */
+    fun isPhoneClaim(text: String): Boolean {
+        val lowered = text.lowercase().replace("’", "'")
+        for (raw in lowered.split(Regex("""(?<=[.!?])\s+"""))) {
+            val sentence = raw.trim()
+            if (sentence.isEmpty() || sentence.endsWith("?")) continue
+            if (isClaim(sentence) || isPhoneActionClaim(sentence)) return true
+            if (phoneAnywhere.containsMatchIn(sentence) || phoneOutcome.containsMatchIn(sentence)) return true
+        }
+        return false
+    }
+
+    private fun isPhoneActionClaim(sentence: String): Boolean {
+        val words = sentence.splitWhere(Char::isWhitespace)
+        if (words.isEmpty() || words.size > maxWords) return false
+        val clauses = sentence
+            .splitWhere { it in ".,!?;:—–…" }
+            .map { it.trim { char -> char == ' ' || char == '\t' } + " " }
+        return clauses.any { clause ->
+            if (phoneGerunds.any { clause.startsWith("$it ") }) return@any true
+            val afterProgressive = rest(clause, progressive)
+            if (afterProgressive != null && phoneGerunds.any { afterProgressive.startsWith("$it ") }) return@any true
+            rest(clause, leads)?.let { rest -> return@any phoneVerbs.any { rest.startsWith("$it ") } }
+            false
+        }
+    }
+
     private fun rest(clause: String, prefixes: List<String>): String? =
         prefixes.firstOrNull(clause::startsWith)?.let { clause.substring(it.length) }
 

@@ -144,6 +144,7 @@ and `ellipsis` (every overflow menu) is the vertical `more_vert`, as on other An
 
 | SF Symbol | Material Symbol (Rounded) | Drawable | Kotlin | iOS files |
 | --- | --- | --- | --- | --- |
+| `alarm` | `alarm` | `ms_alarm` | `SFSymbol.Alarm` | AssistantCallPanel (Android-only) |
 | `antenna.radiowaves.left.and.right` | `cell_tower` | `ms_cell_tower` | `SFSymbol.AntennaRadiowavesLeftAndRight` | WhatsNewList |
 | `antenna.radiowaves.left.and.right.slash` | `signal_disconnected` | `ms_signal_disconnected` | `SFSymbol.AntennaRadiowavesLeftAndRightSlash` | TuningPanelView |
 | `app` | `square` | `ms_square` | `SFSymbol.App` | AppLog, WhatsNewList |
@@ -385,6 +386,7 @@ and `ellipsis` (every overflow menu) is the vertical `more_vert`, as on other An
 | `switch.2` | `toggle_on` | `ms_toggle_on` | `SFSymbol.Switch2` | WhatsNewList |
 | `tablecells` | `table` | `ms_table` | `SFSymbol.Tablecells` | AttachmentFileType |
 | `terminal` | `terminal` | `ms_terminal` | `SFSymbol.Terminal` | ShellOutputView, TranscriptDragSource |
+| `timer` | `timer` | `ms_timer` | `SFSymbol.Timer` | AssistantCallPanel (Android-only) |
 | `text.alignleft` | `format_align_left` | `ms_format_align_left` | `SFSymbol.TextAlignleft` | WhatsNewList |
 | `text.badge.plus` | `post_add` | `ms_post_add` | `SFSymbol.TextBadgePlus` | AppShortcuts, OpenCodeClient+Models |
 | `text.bubble` | `chat` | `ms_chat` | `SFSymbol.TextBubble` | AppShortcuts, BrowserView, PlaygroundHostView, SessionView+Composer, WhatsNewList |

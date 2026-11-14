@@ -85,10 +85,57 @@ enum class ClientTool(val rawValue: String) {
     voiceOpenURL("voice_open_url"),
     voicePlayAudio("voice_play_audio"),
     voiceAudioControl("voice_audio_control"),
+
+    // Android only (the Assistant experiment): the phone's own actions, offered to the session
+    // the side-button assistant talks to (`android_set_timer`, …).
+    aboutPhone("about_phone"),
+    setTimer("set_timer"),
+    setAlarm("set_alarm"),
+    cancelAlarm("cancel_alarm"),
+    stopTimer("stop_timer"),
+    showClock("show_clock"),
+    flashlight("flashlight"),
+    mediaControl("media_control"),
+    playMedia("play_media"),
+    setVolume("set_volume"),
+    setRinger("set_ringer"),
+    setDoNotDisturb("set_do_not_disturb"),
+    setDisplay("set_display"),
+    phoneStatus("phone_status"),
+    openSettings("open_settings"),
+    copyToClipboard("copy_to_clipboard"),
+    openApp("open_app"),
+    readScreen("read_screen"),
+    takePhoto("take_photo"),
+    findContact("find_contact"),
+    addContact("add_contact"),
+    call("call"),
+    answerCall("answer_call"),
+    endCall("end_call"),
+    readCallLog("read_call_log"),
+    sendText("send_text"),
+    readTexts("read_texts"),
+    draftEmail("draft_email"),
+    addCalendarEvent("add_calendar_event"),
+    listCalendarEvents("list_calendar_events"),
+    updateCalendarEvent("update_calendar_event"),
+    deleteCalendarEvent("delete_calendar_event"),
+    openMaps("open_maps"),
+    getLocation("get_location"),
+    readNotifications("read_notifications"),
+    dismissNotification("dismiss_notification"),
+    replyToNotification("reply_to_notification"),
+    notificationAction("notification_action"),
+    share("share"),
+    openLink("open_link"),
     ;
 
+    /** One of the assistant's phone tools, which only the assistant's session may run. */
+    val isPhoneTool: Boolean
+        get() = PhoneToolSpecs.byName.containsKey(rawValue)
+
     val description: String
-        get() = when (this) {
+        get() = PhoneToolSpecs.byName[rawValue]?.description ?: when (this) {
             voiceOpenSession ->
                 "Open a session on the phone during a live voice call. Returns opened only after navigation and drawer closure."
             voiceRequestScreen ->
@@ -99,11 +146,12 @@ enum class ClientTool(val rawValue: String) {
                 "Pause, resume or stop the audio playing on the user's voice call (started with voice_play_audio)."
             voiceOpenURL ->
                 "During a voice call, open a link on the user's Android phone: an https link (app links open their app when it's installed, such as https://m.uber.com/ul/…, else the browser) or an app's own link scheme. They see a card with Open and Not Now; you hear whether it opened. Refused when they say no, don't answer within a minute, the call ends, the phone isn't showing OpenCode (then text them the link), or the link isn't https or an app link (no http, javascript, file, content, intent, data, tel, sms or mailto)."
+            else -> ""
         }
 
-    /** MCP hints: only the screen request is read-only. */
+    /** MCP hints: of the voice tools only the screen request is read-only; phone tools carry their own. */
     val annotations: JsonObject
-        get() = buildJsonObject {
+        get() = PhoneToolSpecs.byName[rawValue]?.annotations ?: buildJsonObject {
             when (this@ClientTool) {
                 voiceRequestScreen -> put("readOnlyHint", true)
                 voiceOpenURL -> {
@@ -112,12 +160,13 @@ enum class ClientTool(val rawValue: String) {
                     put("openWorldHint", true)
                 }
                 voicePlayAudio, voiceAudioControl, voiceOpenSession -> put("readOnlyHint", false)
+                else -> Unit
             }
         }
 
     /** JSON Schema for the tool's arguments. */
     val inputSchema: JsonObject
-        get() = buildJsonObject {
+        get() = PhoneToolSpecs.byName[rawValue]?.inputSchema ?: buildJsonObject {
             put("type", "object")
             when (this@ClientTool) {
                 voiceOpenSession -> {
@@ -172,6 +221,7 @@ enum class ClientTool(val rawValue: String) {
                     }
                     putJsonArray("required") { add(JsonPrimitive("action")) }
                 }
+                else -> Unit
             }
         }
 
@@ -232,6 +282,8 @@ data class ClientToolCall(
     val targetSessionID: String? = null,
     /** Original server tool-call ID, shared by MCP and the SSE fallback. */
     val toolCallID: String? = null,
+    /** A phone tool's arguments as sent (null for the voice tools); the phone tools check their own. */
+    val arguments: JsonObject? = null,
 ) {
     companion object {
         /** The voice lab's stand-in socket: its replies count as sent (debug builds only use it). */
@@ -262,6 +314,9 @@ sealed interface ClientToolsEvent {
     data class Attached(val connection: UUID) : ClientToolsEvent
 
     data class Call(val call: ClientToolCall) : ClientToolsEvent
+
+    /** Android: the server cancelled the call [requestID] on [connection]. */
+    data class Cancelled(val connection: UUID, val requestID: JsonRpcID) : ClientToolsEvent
 
     /** The socket ended; [reason] carries no address or credentials. Its unanswered calls were refused on the way out. */
     data class Closed(val connection: UUID, val reason: String) : ClientToolsEvent
@@ -334,6 +389,9 @@ object ClientMcpProtocol {
         data class Send(val text: String) : Step
         data object Attached : Step
         data class Call(val call: ClientToolCall) : Step
+
+        /** Android: the server gave up on a call (`notifications/cancelled`), so the phone stops it and asks nothing more. */
+        data class Cancelled(val requestID: JsonRpcID) : Step
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -345,6 +403,10 @@ object ClientMcpProtocol {
         val params = message["params"] as? JsonObject
         val id = JsonRpcID.of(message["id"])
         if (id == null) {
+            if (method == "notifications/cancelled") {
+                val requestID = JsonRpcID.of(params?.get("requestId")) ?: return null
+                return Step.Cancelled(requestID)
+            }
             return if (method == "notifications/initialized") Step.Attached else null
         }
         when (method) {
@@ -394,6 +456,7 @@ object ClientMcpProtocol {
                         action = arguments.trimmedArgument("action"),
                         targetSessionID = arguments.trimmedArgument("session_id"),
                         toolCallID = arguments.trimmedArgument("tool_call_id"),
+                        arguments = if (tool.isPhoneTool) arguments else null,
                     ),
                 )
             }
@@ -555,6 +618,7 @@ internal object ClientMcpSocket {
                             sockets.received(step.call)
                             trySend(ClientToolsEvent.Call(step.call))
                         }
+                        is ClientMcpProtocol.Step.Cancelled -> trySend(ClientToolsEvent.Cancelled(id, step.requestID))
                         null -> {}
                     }
                 }

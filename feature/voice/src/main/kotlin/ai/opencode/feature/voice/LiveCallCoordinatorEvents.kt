@@ -208,9 +208,12 @@ private fun LiveCallCoordinator.userAsked(before: Duration?): Boolean {
     val last = lastDelegationCreatedAt ?: return true
     return before > last + timing.liveAnswerPressedAfter
 }
+/** Android only: an assistant call also counts phone phrases ("Setting it now.", "It's set."). */
+private fun LiveCallCoordinator.isUnbackedClaim(text: String): Boolean =
+    VoiceActionClaim.isClaim(text) || (config?.phoneClaims == true && VoiceActionClaim.isPhoneClaim(text))
 private fun LiveCallCoordinator.watchForUnbackedClaim(text: String, userWordsBefore: Duration?) {
     if (timing.liveUnbackedClaimWait <= Duration.ZERO || finished || pendingDelegationTasks.isNotEmpty() || acknowledgements.isNotEmpty() ||
-        !userAsked(userWordsBefore) || !VoiceActionClaim.isClaim(text)) return
+        !userAsked(userWordsBefore) || !isUnbackedClaim(text)) return
     unbackedClaimTask?.cancel()
     unbackedClaimTask = scope.launch {
         clock.sleep(timing.liveUnbackedClaimWait); unbackedClaimTask = null

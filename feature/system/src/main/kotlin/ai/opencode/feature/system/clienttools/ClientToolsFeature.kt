@@ -13,6 +13,7 @@ import ai.opencode.server.clienttools.ClientToolResult
 import ai.opencode.server.clienttools.ClientToolsClient
 import ai.opencode.server.clienttools.ClientToolsEvent
 import ai.opencode.server.clienttools.ClientToolsTarget
+import ai.opencode.server.clienttools.JsonRpcID
 import ai.opencode.server.OpenCodeServer
 import ai.opencode.server.retry.NetworkPathClient
 import kotlinx.coroutines.Deferred
@@ -99,6 +100,9 @@ class ClientToolsFeature : Reducer<ClientToolsFeature.State, ClientToolsFeature.
 
         /** The socket closed or was torn down: its unanswered calls are refused by the client, and anything showing them goes. */
         data class Disconnected(val connection: UUID) : DelegateAction
+
+        /** Android: the server cancelled a call, so whatever runs it stops. */
+        data class Cancelled(val connection: UUID, val requestID: JsonRpcID) : DelegateAction
     }
 
     sealed interface CancelID {
@@ -187,6 +191,11 @@ class ClientToolsFeature : Reducer<ClientToolsFeature.State, ClientToolsFeature.
                     state.copy(connection = event.call.connection),
                     Effect.send(Action.Delegate(DelegateAction.ToolCalled(event.call))),
                 )
+            }
+
+            is ClientToolsEvent.Cancelled -> {
+                AppLog.network.info { "client tools: call cancelled" }
+                return Reduced(state, Effect.send(Action.Delegate(DelegateAction.Cancelled(event.connection, event.requestID))))
             }
 
             is ClientToolsEvent.Closed -> {

@@ -986,8 +986,8 @@ fun HomeFeature.State.makeDetail(
         s = s.copy(waitingPicks = s.waitingPicks - session.id)
         detail = detail.copy(currentModel = pick, pendingModel = pick)
     }
-    // A live call follows the screen.
-    val voice = transition.activeVoice?.retarget(session, reason = transition.reason)
+    // A live call follows the screen. Android: an assistant call stays with the session it started in.
+    val voice = transition.activeVoice?.let { if (it.isAssistantCall) it else it.retarget(session, reason = transition.reason) }
     detail = s.finishingDetailTransition(detail, voice, transition.keepsIdentity)
     val (restored, withDraft) = s.restoringPersistedDraft(detail)
     s = restored
@@ -1028,6 +1028,7 @@ fun HomeFeature.State.makeDraft(
         visit = transition.visit,
     ).copy(outboxDraftID = outboxDraftID)
     val voice = transition.activeVoice?.let { current ->
+        if (current.isAssistantCall) return@let current
         val callDirectory = draft.draftProject?.directory ?: outgoingDirectory ?: current.target.directory
         current.retargetToDraft(directory = callDirectory, model = draft.currentModel, reason = transition.reason)
     }

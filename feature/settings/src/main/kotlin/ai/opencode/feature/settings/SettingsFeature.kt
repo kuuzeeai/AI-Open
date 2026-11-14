@@ -56,6 +56,12 @@ sealed interface SettingsPage {
     /** Settings › Voice › Call History › one call (`VoiceCallReplayView`, `:feature:voice`). */
     data class CallReplay(val log: VoiceCallLog) : SettingsPage
     data object Notifications : SettingsPage
+    /** Settings › Assistant (Android only, experimental): making OpenCode the side button's assistant. */
+    data object Assistant : SettingsPage
+    /** Settings › Assistant › Pinned Session (Android only). */
+    data object AssistantSession : SettingsPage
+    /** Settings › Assistant › Permissions (Android only). */
+    data object AssistantPermissions : SettingsPage
     data object WhatsNew : SettingsPage
     /** One entry's page in What's New. */
     data class WhatsNewDetail(val entryID: String) : SettingsPage
@@ -294,6 +300,13 @@ class SettingsFeature : Reducer<SettingsFeature.State, SettingsFeature.Action> {
         is Action.Settings -> when (action.action) {
             HomeSettingsFeature.Action.OnboardingPlaygroundOpened ->
                 Reduced(state.copy(onboardingPlayground = OnboardingPlaygroundFeature.State()))
+            // Picking the pinned session closes the picker, back on Settings › Assistant.
+            is HomeSettingsFeature.Action.AssistantSessionPinned ->
+                if (state.path.lastOrNull() == SettingsPage.AssistantSession) {
+                    setPath(state, state.path.dropLast(1))
+                } else {
+                    Reduced(state)
+                }
             else -> Reduced(state)
         }
         is Action.WhatsNew -> whatsNew(state, action.action)

@@ -157,9 +157,11 @@ object VoiceLabDemo {
                         }
                     }
                     script.sortBy { it.time }
+                    val dropAt = VoiceLabEnvironment.string("OPENCODE_LAB_VOICE_DROP_AT")?.toDoubleOrNull()
                     var next = 0
                     while (isActive) {
                         val elapsed = (clock.now() - start).inWholeNanoseconds / 1e9
+                        if (dropAt != null && elapsed >= dropAt) throw LabFailure("The voice connection dropped.")
                         val snapshot = if (VoiceLabEnvironment.flag("OPENCODE_LAB_VOICE_CONTINUOUS")) VoiceAudioLevels.Snapshot(
                             VoiceScriptedDemo.continuousSpeechLevel(elapsed), VoiceScriptedDemo.continuousSpeechLevel(elapsed, 3.2, 1.9))
                         else recorded?.levels(elapsed) ?: VoiceScriptedDemo.levels(elapsed % VoiceScriptedDemo.loop)

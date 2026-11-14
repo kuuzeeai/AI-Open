@@ -31,6 +31,7 @@ import ai.opencode.feature.drawer.keepingSettings
 import ai.opencode.feature.drawer.persistingSnapshot
 import ai.opencode.feature.media.BrowserFeature
 import ai.opencode.feature.session.SessionFeature
+import ai.opencode.feature.settings.SettingsPage
 import ai.opencode.feature.settings.onboarding.WelcomeFeature
 import ai.opencode.feature.system.NotificationDestination
 import ai.opencode.feature.system.SessionDirectory
@@ -96,6 +97,10 @@ class AppFeature : Reducer<AppFeature.State, AppFeature.Action> {
         val delegatorClientTools: ClientToolsFeature.State = ClientToolsFeature.State(slot = ClientToolsFeature.State.Slot.Delegator),
         /** Where that delegator session lives, once read. */
         val voiceDelegatorLocation: ClientToolsLocation? = null,
+        /** Android only: the session the side-button assistant talks to, which gets the phone's tools. */
+        val assistantScope: AssistantScope? = null,
+        /** Android only: Settings › Assistant › Phone Tools is All Calls, so in-app calls get the phone's tools too. */
+        val phoneToolsInAllCalls: Boolean = false,
         val voiceOpenSession: VoiceOpenSessionFeature.State = VoiceOpenSessionFeature.State(),
         val connection: Connection = Connection.Idle,
         val connectionGeneration: Int = 0,
@@ -471,6 +476,8 @@ class AppFeature : Reducer<AppFeature.State, AppFeature.Action> {
         /** A session the action names that the list doesn't have. */
         data class SystemSessionLoaded(val action: SystemAction, val sessionID: String, val result: Result<OpenCodeSession>) : Action
         data object SystemActionErrorDismissed : Action
+        /** Android only: the assistant panel opens Settings at a page (Voice, Experimental). */
+        data class SettingsPageRequested(val page: SettingsPage) : Action
         /** The app became active: take what the share sheet left. */
         data object PendingSharesRequested : Action
         data class SharesReceived(val shares: List<ReceivedShare>) : Action
@@ -499,6 +506,18 @@ class AppFeature : Reducer<AppFeature.State, AppFeature.Action> {
         data class ClientTools(val action: ClientToolsFeature.Action) : Action
         data class DelegatorClientTools(val action: ClientToolsFeature.Action) : Action
         data class VoiceDelegatorLocated(val location: ClientToolsLocation) : Action
+
+        /**
+         * Android only: the assistant's panel opened for [scope]'s session, or closed (null). The
+         * phone's tools stay offered until that session's turn finishes.
+         */
+        data class AssistantPanelChanged(val scope: AssistantScope?) : Action
+
+        /** Android only: the short wait after the panel closed, for the session to start its turn, is over. */
+        data object AssistantGraceElapsed : Action
+
+        /** Android only: Settings › Assistant › Phone Tools changed (All Calls when [allCalls]). */
+        data class PhoneToolsReachChanged(val allCalls: Boolean) : Action
         data class VoiceOpenSession(val action: VoiceOpenSessionFeature.Action) : Action
         data class HomeResponse(val attemptID: Int, val result: Result<OpenCodeHomeSnapshot>, val archived: List<OpenCodeSession> = emptyList()) : Action
         /** Server Flow: the switch's server didn't answer in time. */
@@ -580,6 +599,13 @@ class AppFeature : Reducer<AppFeature.State, AppFeature.Action> {
         return Reduced(reduced.state.copy(home = home.copy(drawerOpenRequest = null)), reduced.effect)
     }
 
+    private fun settingsPageRequested(state: State, page: SettingsPage): Reduced<State, Action> {
+        val home = state.home ?: return Reduced(state)
+        val shown = home.showingSettings()
+        val settings = shown.settings ?: return Reduced(state.copy(home = shown))
+        return Reduced(state.copy(home = shown.copy(settings = settings.copy(path = listOf(page)))))
+    }
+
     private fun reduceCore(state: State, action: Action): Reduced<State, Action> = when (action) {
         Action.Task -> {
             migrateSettingsIfNeeded(state.knownServers)
@@ -613,6 +639,7 @@ class AppFeature : Reducer<AppFeature.State, AppFeature.Action> {
         }
         Action.SystemActionsTaskEnded -> Reduced(state, Effect.cancel(CancelID.SystemActions))
         is Action.SystemActionReceived -> systemActionReceived(state, action.action)
+        is Action.SettingsPageRequested -> settingsPageRequested(state, action.page)
         is Action.SystemSessionLoaded -> systemSessionLoaded(state, action)
         Action.SystemActionErrorDismissed -> Reduced(state.copy(systemActionError = null))
         Action.PendingSharesRequested -> {
@@ -682,7 +709,8 @@ class AppFeature : Reducer<AppFeature.State, AppFeature.Action> {
         is Action.HomeResponse -> homeResponse(state, action)
         is Action.ServerSwitchTimedOut -> serverSwitchTimedOut(action.attemptID, state)
         is Action.Home -> home(state, action.action)
-        is Action.Welcome, is Action.ClientTools, is Action.DelegatorClientTools, is Action.VoiceDelegatorLocated, is Action.VoiceOpenSession -> Reduced(state)
+        is Action.Welcome, is Action.ClientTools, is Action.DelegatorClientTools, is Action.VoiceDelegatorLocated, is Action.VoiceOpenSession,
+        is Action.AssistantPanelChanged, Action.AssistantGraceElapsed, is Action.PhoneToolsReachChanged -> Reduced(state)
     }
 
     /**

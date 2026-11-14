@@ -2,8 +2,10 @@ package ai.opencode.feature.settings
 
 import ai.opencode.core.experiments.key
 import ai.opencode.core.dependencies.Dependency
+import ai.opencode.core.experiments.AssistantExperiment
 import ai.opencode.core.experiments.ExperimentalFeature
 import ai.opencode.core.experiments.InAppNoticeMode
+import ai.opencode.core.log.AppLog
 import ai.opencode.core.haptics.Haptic
 import ai.opencode.core.haptics.HapticsClient
 import ai.opencode.core.sharing.AllExperiments
@@ -23,6 +25,8 @@ import ai.opencode.core.store.Reducer
 import ai.opencode.core.ui.AppTheme
 import ai.opencode.core.ui.AppearanceColorScheme
 import ai.opencode.core.ui.ThemeSharedKeys
+import ai.opencode.feature.voice.PhoneAccess
+import ai.opencode.feature.voice.PhoneAccessClient
 import ai.opencode.feature.voice.CallVoice
 import ai.opencode.feature.voice.ServerVoiceClient
 import ai.opencode.feature.voice.ServerVoiceProvider
@@ -36,6 +40,7 @@ import ai.opencode.feature.voice.VoiceModelsCache
 import ai.opencode.feature.voice.VoiceReadiness
 import ai.opencode.feature.voice.VoiceServerChoice
 import ai.opencode.feature.voice.VoiceSharedKeys
+import ai.opencode.feature.system.assistant.AssistantSetupClient
 import ai.opencode.server.OpenCodeServer
 import java.util.Locale
 
@@ -62,6 +67,22 @@ class HomeSettingsFeature : Reducer<HomeSettingsFeature.State, HomeSettingsFeatu
         /** Settings › Experimental › Sound Effects › Send Sound. */
         data class SoundEffectsSendChanged(val on: Boolean) : Action
         data class VoiceModeEnabledChanged(val on: Boolean) : Action
+        /** Settings › Experimental › Assistant (Android only). */
+        data class AssistantExperimentChanged(val on: Boolean) : Action
+        /** Settings › Assistant › Permissions › Make Calls, Send Texts, Read Notifications: Always or Ask First. */
+        data class AssistantAskingChanged(val asking: AssistantAsking, val on: Boolean) : Action
+        /** Settings › Assistant › Permissions: asks Android, or opens the setting that grants it. */
+        data class AssistantAllowTapped(val access: PhoneAccess) : Action
+        /** Settings › Assistant › Session (Android only). */
+        data class AssistantSessionChoiceChanged(val choice: AssistantExperiment.SessionChoice) : Action
+        /** A session picked for the assistant: [scopedID] is `<server key>:<session ID>`. */
+        data class AssistantSessionPinned(val scopedID: String, val title: String) : Action
+        /** Settings › Assistant › Phone Tools: All Calls when [allCalls], else Assistant Calls Only. */
+        data class AssistantPhoneToolsReachChanged(val allCalls: Boolean) : Action
+        /** Settings › Assistant › Use OpenCode as Assistant, and Permissions › Use Text From Screen. */
+        data object AssistantSettingsTapped : Action
+        /** Settings › Assistant › Side Button. */
+        data object SideButtonSettingsTapped : Action
         data class RaiseToTalkChanged(val on: Boolean) : Action
         data class VoiceEngineChanged(val engine: VoiceEngine) : Action
         data class ServerVoiceProviderChanged(val provider: ServerVoiceProvider) : Action
@@ -96,6 +117,8 @@ class HomeSettingsFeature : Reducer<HomeSettingsFeature.State, HomeSettingsFeatu
 
     private val haptics by Dependency(HapticsClient)
     private val appLanguage by Dependency(AppLanguageClient)
+    private val assistantSetup by Dependency(AssistantSetupClient)
+    private val phoneAccess by Dependency(PhoneAccessClient)
     private val serverVoice by Dependency(ServerVoiceClient)
     private val soundEffects by Dependency(SoundEffectsClient)
 
@@ -121,6 +144,42 @@ class HomeSettingsFeature : Reducer<HomeSettingsFeature.State, HomeSettingsFeatu
         when (action) {
             Action.SidebarToggled -> shared(SharedKeys.sidebarShown).update { !it }
             is Action.InAppNoticeModeChanged -> setShared(InAppNoticeMode.key, action.mode)
+            is Action.AssistantExperimentChanged -> setShared(AssistantExperiment.key, action.on)
+            is Action.AssistantAskingChanged -> {
+                val key = when (action.asking) {
+                    AssistantAsking.calls -> AssistantExperiment.callsWithoutAsking
+                    AssistantAsking.texts -> AssistantExperiment.textsWithoutAsking
+                    AssistantAsking.notifications -> AssistantExperiment.readsNotificationsWithoutAsking
+                }
+                setShared(key, action.on)
+            }
+            is Action.AssistantAllowTapped -> {
+                AppLog.app.info { "Assistant phone access allow tapped access=${action.access.name}" }
+                return Reduced(state, Effect.run { phoneAccess.allow(action.access) })
+            }
+            is Action.AssistantSessionChoiceChanged -> {
+                setShared(AssistantExperiment.sessionChoice, action.choice.rawValue)
+                AppLog.app.info { "Assistant session mode=${action.choice.rawValue}" }
+            }
+            is Action.AssistantPhoneToolsReachChanged -> {
+                setShared(AssistantExperiment.phoneToolsInAllCalls, action.allCalls)
+                AppLog.app.info { "Assistant phone tools allCalls=${action.allCalls}" }
+            }
+            is Action.AssistantSessionPinned -> {
+                setShared(AssistantExperiment.pinnedSession, action.scopedID)
+                setShared(AssistantExperiment.pinnedSessionTitle, action.title)
+                setShared(AssistantExperiment.pinnedSessionMissing, false)
+                setShared(AssistantExperiment.sessionChoice, AssistantExperiment.SessionChoice.pinned.rawValue)
+                AppLog.app.info { "Assistant session mode=pinned session=${action.scopedID.substringAfter(':')}" }
+            }
+            Action.AssistantSettingsTapped -> {
+                val setup = assistantSetup
+                return Reduced(state, Effect.run { setup.openAssistantSettings() })
+            }
+            Action.SideButtonSettingsTapped -> {
+                val setup = assistantSetup
+                return Reduced(state, Effect.run { setup.openSideButtonSettings() })
+            }
             is Action.ExperimentalFeatureChanged -> {
                 if (!setShared(action.feature.key, action.on)) return Reduced(state)
                 // Switched by hand while All Experiments is on: off is a skip, kept for next time.
@@ -228,3 +287,6 @@ class HomeSettingsFeature : Reducer<HomeSettingsFeature.State, HomeSettingsFeatu
         return Reduced(state, Effect.none())
     }
 }
+
+/** Settings › Assistant › Permissions › Actions: the Ask First switches (Android only). */
+enum class AssistantAsking { calls, texts, notifications }

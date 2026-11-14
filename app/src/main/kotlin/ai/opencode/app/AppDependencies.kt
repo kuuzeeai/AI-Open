@@ -9,6 +9,9 @@ import ai.opencode.core.tuning.DeveloperMode
 import ai.opencode.feature.composer.PendingPrompt
 import ai.opencode.feature.composer.PromptOutbox
 import ai.opencode.feature.composer.ComposerFileAttachment
+import ai.opencode.app.assistant.AssistantFlow
+import ai.opencode.app.assistant.OpenCodeAssistantService
+import ai.opencode.feature.voice.AssistantPanelClient
 import ai.opencode.feature.voice.ShutterSystemSound
 import ai.opencode.feature.voice.VoiceAdmissionRecorder
 import ai.opencode.feature.voice.VoiceCallDiagnostics
@@ -51,6 +54,15 @@ internal object AppDependencies {
                     dependency(AudioSessionOwner).onHolderActivating(stop)
             }
             this[ScreenCaptureShutterSound] = ShutterSystemSound.live()
+            // Android only: the side-button panel asks before a phone tool that needs a yes (reading
+            // notifications, a call, a text), shows a chip for what the tools did, and asks Android
+            // for the screen.
+            this[AssistantPanelClient] = AssistantPanelClient(
+                confirm = { AssistantFlow.shared.confirm(it) },
+                acted = { AssistantFlow.shared.acted(it) },
+                showedScreen = { AssistantFlow.shared.showedScreen() },
+                readScreen = { OpenCodeAssistantService.readScreen() },
+            )
             // `PromptOutbox.recordAdmitted` with the send voice made.
             this[VoiceAdmissionRecorder] = VoiceAdmissionRecorder { prompt, sessionID, serverKey ->
                 dependency(PromptOutbox).recordAdmitted(

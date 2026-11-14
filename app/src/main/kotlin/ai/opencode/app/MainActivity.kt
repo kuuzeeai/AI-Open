@@ -1,12 +1,15 @@
 package ai.opencode.app
 
+import ai.opencode.app.assistant.AssistantFlow
 import ai.opencode.feature.system.LeftToRight
 import ai.opencode.feature.system.NotificationDestination
 import ai.opencode.feature.system.SystemAction
+import ai.opencode.feature.system.SystemActionInbox
 import ai.opencode.feature.system.share.ShareConversation
 import ai.opencode.server.LocalNetworkPermission
 import ai.opencode.server.OpenCodePairingLink
 import ai.opencode.core.dependencies.dependency
+import ai.opencode.core.log.AppLog
 import ai.opencode.core.diagnostics.PerfFrameSampler
 import ai.opencode.core.diagnostics.PerfTimeline
 import ai.opencode.core.sharing.shared
@@ -19,6 +22,7 @@ import android.Manifest
 import android.app.UiModeManager
 import android.content.Context
 import android.content.Intent
+import ai.opencode.feature.settings.SettingsPage
 import android.content.pm.PackageManager
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.CompletableDeferred
@@ -40,6 +44,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import ai.opencode.feature.drawer.HomeFeature
 import ai.opencode.feature.system.SessionWindowTarget
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -64,6 +69,10 @@ class MainActivity : ComponentActivity() {
         localNetworkRequest = null
     }
     private var removeRequesters: List<() -> Unit> = emptyList()
+
+    /** Started by the assistant and see-through until it steps aside (`hideForAssistant`). */
+    private var isSteppingAside = false
+    private var windowAnimations = 0
 
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(newBase)
@@ -104,10 +113,14 @@ class MainActivity : ComponentActivity() {
         splash.setKeepOnScreenCondition { LaunchBloomController.keepsCover(store.state.isColdLaunchContentReady) }
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null && intent?.action == ACTION_ASSISTANT_CALL) hideForAssistant()
         lifecycle.addObserver(
             LifecycleEventObserver { _, event ->
                 when (event) {
-                    Lifecycle.Event.ON_START -> store.send(AppFeature.Action.ForegroundChanged(true))
+                    Lifecycle.Event.ON_START -> {
+                        store.send(AppFeature.Action.ForegroundChanged(true))
+                        AssistantFlow.shared.appShown(true)
+                    }
                     // Take what the share sheet left.
                     Lifecycle.Event.ON_RESUME -> {
                         SceneWindows.resumed(root)
@@ -118,7 +131,11 @@ class MainActivity : ComponentActivity() {
                         removeRequesters.forEach { it() }
                         removeRequesters = emptyList()
                     }
-                    Lifecycle.Event.ON_STOP -> if (!isChangingConfigurations) store.send(AppFeature.Action.ForegroundChanged(false))
+                    Lifecycle.Event.ON_STOP -> if (!isChangingConfigurations) {
+                        store.send(AppFeature.Action.ForegroundChanged(false))
+                        AssistantFlow.shared.appShown(false)
+                        if (isSteppingAside) showAfterAssistant()
+                    }
                     else -> Unit
                 }
             },
@@ -249,10 +266,16 @@ class MainActivity : ComponentActivity() {
             if (next != root.shown) store.send(AppFeature.Action.Home(HomeFeature.Action.SessionTapped(next.sessionID)))
             return
         }
+        // Opened for something else while still see-through from the assistant's start.
+        if (intent.action != ACTION_ASSISTANT_CALL) showAfterAssistant()
         handle(intent)
     }
 
     private fun handle(intent: Intent?) {
+        if (intent?.action == ACTION_ASSISTANT_CALL) {
+            stepAsideForAssistant()
+            return
+        }
         val action = route(intent) ?: return
         LaunchBloomController.completeColdLaunch()
         if (action is AppFeature.Action.NotificationOpened) {
@@ -266,7 +289,64 @@ class MainActivity : ComponentActivity() {
         store.send(action)
     }
 
+    /**
+     * Android only: the assistant started a call while the app wasn't running, so the app opens
+     * to take it (its call needs a window) and goes back behind the app the user was in once the
+     * call is running; the assistant's panel stays on screen over it.
+     */
+    private fun stepAsideForAssistant() {
+        lifecycleScope.launch {
+            // The store only has to be up to take the call; the panel over the other app keeps
+            // the microphone, so the app goes as soon as the call is handed over.
+            var waited = 0L
+            while (!SystemActionInbox.shared.isListening && waited < ASSISTANT_CALL_BUDGET_MS) {
+                delay(50)
+                waited += 50
+            }
+            if (SystemActionInbox.shared.isListening && isSteppingAside) {
+                AppLog.app.info("Assistant call handed over; app stepped aside")
+                moveTaskToBack(true)
+            } else {
+                showAfterAssistant()
+            }
+        }
+    }
+
+    /**
+     * Started only to make the call's store, the app stays see-through and still: the panel over
+     * the app the user was in is what they see, not the app opening and leaving.
+     */
+    private fun hideForAssistant() {
+        isSteppingAside = true
+        windowAnimations = window.attributes.windowAnimations
+        window.setWindowAnimations(0)
+        window.attributes = window.attributes.also { it.alpha = 0f }
+    }
+
+    private fun showAfterAssistant() {
+        if (!isSteppingAside) return
+        isSteppingAside = false
+        window.attributes = window.attributes.also { it.alpha = 1f }
+        window.setWindowAnimations(windowAnimations)
+    }
+
     companion object {
+        /** Android only: the assistant opens the app to start its call, then the app steps aside. */
+        const val ACTION_ASSISTANT_CALL = "ai.opencode.action.ASSISTANT_CALL"
+        private const val ASSISTANT_CALL_BUDGET_MS = 10_000L
+
+        /** Android only: the assistant panel opens Settings at the page it needs (`EXTRA_SETTINGS_PAGE`). */
+        const val ACTION_OPEN_SETTINGS = "ai.opencode.action.OPEN_SETTINGS"
+        const val EXTRA_SETTINGS_PAGE = "ai.opencode.extra.SETTINGS_PAGE"
+        const val SETTINGS_PAGE_VOICE = "voice"
+        const val SETTINGS_PAGE_EXPERIMENTAL = "experimental"
+
+        private fun settingsPage(name: String?): SettingsPage? = when (name) {
+            SETTINGS_PAGE_VOICE -> SettingsPage.Voice
+            SETTINGS_PAGE_EXPERIMENTAL -> SettingsPage.Experimental()
+            else -> null
+        }
+
         /** A notification tap, an `opencode://` system action link, or a pairing link. */
         fun route(intent: Intent?): AppFeature.Action? {
             intent ?: return null
@@ -274,6 +354,9 @@ class MainActivity : ComponentActivity() {
                 val server = intent.getStringExtra(NotificationDestination.EXTRA_SERVER) ?: return null
                 val session = intent.getStringExtra(NotificationDestination.EXTRA_SESSION) ?: return null
                 return AppFeature.Action.NotificationOpened(NotificationDestination(server, session))
+            }
+            if (intent.action == ACTION_OPEN_SETTINGS) {
+                return settingsPage(intent.getStringExtra(EXTRA_SETTINGS_PAGE))?.let { AppFeature.Action.SettingsPageRequested(it) }
             }
             if (intent.action != Intent.ACTION_VIEW) return null
             val url = intent.dataString ?: return null

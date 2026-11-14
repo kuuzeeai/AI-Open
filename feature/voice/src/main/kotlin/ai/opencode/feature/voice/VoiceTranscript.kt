@@ -623,6 +623,12 @@ object VoiceInstructions {
         val unpromptedMoveReason: String? = null,
         /** What the voice model calls itself (Realtime and Grok Voice). */
         val voiceLayer: String = VoiceEngine.realtime.selfDescription,
+        /**
+         * Android only: a call started from the side button (OpenCode as the phone's
+         * assistant). Its session holds the phone's own tools, so phone requests go to
+         * `delegate` like any other ([AssistantWording]).
+         */
+        val assistant: Boolean = false,
     )
 
     val delegateTool = RealtimeFunctionTool(
@@ -744,6 +750,7 @@ object VoiceInstructions {
     fun buildLive(context: Context): String {
         val sections = mutableListOf<String>()
         val tools = if (context.managesSessions) managedTools else attachedTools
+        val assistantRules = if (context.assistant) "\n" + AssistantWording.screenRule else ""
         val blocked = if (context.managesSessions) {
             "When a session is blocked on a permission or a question, say what it's asking, and on the user's answer delegate it (delegating can approve, deny, or answer). Never approve or answer without the user's word."
         } else {
@@ -769,7 +776,7 @@ Delegation policy:
 Tools:
 $tools
 
-Delegate when:
+Delegate when:$assistantRules
 - The request needs the project, its files, its history, running work, commands, tests, external tools, or careful reasoning.
 - The user asks for data or an action and you don't know whether the session can do it: delegate it to the session to find out and use its tools. Report a limitation only after the session reports a real one, describing the narrow blocker; never ask the user to paste data the session may be able to read; never claim access or success you didn't get; never bypass the session's approval gates.
 - Work already running never blocks a delegation. Delegate follow-ups and status checks immediately even while work is running; they steer the running work at its next step. Asking how it's going, to hurry, to wrap up with what it has, or to change course is a new delegation, not a repeat: delegate it. Never refuse because something is running, and never tell the user to open or cancel the session for this.
@@ -862,6 +869,7 @@ $personalMessagesSection
 
 - Explicit requests ("hang up", "end the call", "bye", "that's all for now") mean end the call: call end_voice_session immediately, then say one brief goodbye. A goodbye to someone else ("Bye, Keanu") isn't one.
 - Do not end the call for a bare "stop", a request to pause or stay quiet, or thanks alone."""
+        if (context.assistant) sections += AssistantWording.realtimeSection
         appendContextSections(sections, context)
         return sections.joinToString("\n\n")
     }
@@ -908,4 +916,25 @@ $personalMessagesSection
                 context.previousTail.joinToString("\n")
         }
     }
+}
+
+/**
+ * Android only: what an assistant call (the side button) adds to the voice model's instructions.
+ * The voice model has no phone tools of its own; the session does phone things through the
+ * phone's client tools (`android_set_timer` and the rest), so every request goes to `delegate`.
+ *
+ * GPT-Live gets one rule and nothing else: the GPT-Live → session → phone eval
+ * (shots/assistant/eval/round2) found longer hand-off rules made it delegate less (56% vs 74%),
+ * and that without this rule it answers "what's on my screen" from its own prompt.
+ */
+object AssistantWording {
+    /** Heads GPT-Live's "Delegate when" list. */
+    const val screenRule = """- "My screen", "this", or "what I'm looking at" means the app the user was in before the call, not the session described here: delegate it so the session reads the screen. Never answer it from these instructions."""
+
+    /** A section for Realtime and Grok Voice. */
+    const val realtimeSection = """# The User's Phone
+
+- The user started this call from their phone's side button. The session can set timers and alarms, open apps, and read the screen the user was on, through the phone's tools; you can't do any of it yourself.
+- Phone requests go to `delegate` like any other request, in the same turn. Never say a timer or alarm is set, or an app is open, until the result says so.
+- "My screen" or "this" means the app the user was in before the call: delegate it so the session reads the screen."""
 }

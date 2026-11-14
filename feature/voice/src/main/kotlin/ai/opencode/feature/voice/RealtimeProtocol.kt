@@ -103,6 +103,8 @@ data class RealtimeSessionConfig(
      * via `session.instructions.append` and runs the 900 ms action-claim backstop.
      */
     val unboundSpeechUsesInstructions: Boolean = false,
+    /** Android only: an assistant (side button) call, whose safety net also listens for phone phrases. */
+    val phoneClaims: Boolean = false,
 ) {
     fun liveSessionConfig(input: List<LiveInputMessage> = emptyList()): LiveSessionConfig = LiveSessionConfig(
         model = if (model == defaultModel) LiveSessionConfig.defaultModel else model,
@@ -113,6 +115,7 @@ data class RealtimeSessionConfig(
         serverVoice = serverVoice,
         delegation = liveDelegation,
         unboundSpeechUsesInstructions = unboundSpeechUsesInstructions,
+        phoneClaims = phoneClaims,
     )
 
     /** The socket address: the model rides in the query on both services. */

@@ -81,6 +81,14 @@ It reads `opencode-android/release/*` from AWS Secrets Manager, step by step
   Internal testing → Testers).
 - Internal testing has no Google review. Closed or open testing (like iOS's External group)
   needs the store listing, content rating, data safety form and privacy policy first.
+- Permissions declaration (App content → Sensitive app permissions): `SEND_SMS`, `READ_SMS` and
+  `READ_CALL_LOG` fall under Play's SMS and Call Log policy. Declare them under the permitted
+  use **Default Assistant handler**, with a video of the user picking OpenCode as the default
+  digital assistant, then the assistant sending a text and reading texts and the call log. The
+  app asks for and uses all three only while it holds `android.app.role.ASSISTANT` (otherwise
+  `send_text` falls back to a draft and the reads answer that OpenCode must be the assistant),
+  reads behind a card, and never stores or logs what it reads. `ANSWER_PHONE_CALLS` and
+  `CALL_PHONE` need no declaration.
 - Open testing: in Play Console (Testing → Open testing) choose the countries and set up the
   testers page, finish the items above, then `gh variable set PLAY_OPEN_TESTING -e release --body true`.
   Unset it (`gh variable delete PLAY_OPEN_TESTING -e release`) to stop. Google reviews open testing

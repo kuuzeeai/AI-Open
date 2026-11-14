@@ -146,6 +146,7 @@ internal suspend fun requestGetSession(server: OpenCodeServer, sessionID: String
 @Serializable private data class ArchiveBody(val archived: Boolean)
 @Serializable private data class IdleBody(val idle: Long)
 @Serializable private data class MessageIDBody(val messageID: String)
+@Serializable private data class InstructionBody(val value: String)
 @Serializable private data class CreateBody(val id: String? = null, val location: Location) {
     @Serializable data class Location(val directory: String)
 }
@@ -281,4 +282,14 @@ internal suspend fun requestDeleteSession(server: OpenCodeServer, sessionID: Str
 
 internal suspend fun requestMoveToBackground(server: OpenCodeServer, sessionID: String) {
     perform("/api/session/$sessionID/background", method = "POST", server = server)
+}
+
+/** `PUT` (with `{"value": …}`) or `DELETE /api/experimental/session/{id}/instructions/entries/{key}`; both set it the same on a repeat. */
+internal suspend fun requestSetSessionInstruction(server: OpenCodeServer, sessionID: String, key: String, value: String?) {
+    val path = "/api/experimental/session/${pathComponent(sessionID)}/instructions/entries/${pathComponent(key)}"
+    if (value == null) {
+        perform(path, method = "DELETE", idempotency = RequestIdempotency.Idempotent, server = server)
+        return
+    }
+    perform(path, method = "PUT", body = encodedBody(InstructionBody(value)), idempotency = RequestIdempotency.Idempotent, server = server)
 }

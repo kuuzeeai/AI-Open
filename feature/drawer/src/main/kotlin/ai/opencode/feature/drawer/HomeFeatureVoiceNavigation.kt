@@ -16,6 +16,8 @@ fun HomeFeature.State.pushingPendingSubagent(reason: String? = null): HomeFeatur
 fun HomeFeature.State.retargetingCallToTop(reason: String): HomeFeature.State {
     val voice = sessionDetail?.voice ?: return this
     if (voice.phase.isTerminal) return this
+    // Android: an assistant call stays with the session it started in.
+    if (voice.isAssistantCall) return this
     val topScreen = topDetail ?: return this
     val top = topScreen.session ?: return this
     if (voice.target.sessionID == top.id) return this
