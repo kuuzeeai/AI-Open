@@ -180,6 +180,49 @@ class PhoneToolsTests {
         val allDay = PhoneTools.parse("add_calendar_event", args("title" to "Trip", "start" to "2026-11-12")) as PhoneTools.Call.AddCalendarEvent
         assertTrue(allDay.allDay)
         assertTrue(PhoneTools.parse("add_calendar_event", args("title" to "Bad", "start" to "2026-11-12T19:00", "end" to "2026-11-12T18:00")) is PhoneTools.Invalid)
+        assertNull(event.calendar)
+        val named = PhoneTools.parse("add_calendar_event", args("title" to "Dinner", "start" to "2026-11-12T19:00", "calendar" to " Work ")) as PhoneTools.Call.AddCalendarEvent
+        assertEquals("Work", named.calendar)
+    }
+
+    @Test fun newEventsGoToTheOnlyAccountsCalendarNotThePhoneOnlyOne() {
+        val onPhone = PhonePlaces.WritableCalendar(1, "My calendar", "My calendar", syncs = false, primary = true)
+        val sam = PhonePlaces.WritableCalendar(4, "sam@example.com", "sam@example.com", syncs = true, primary = true)
+        val family = PhonePlaces.WritableCalendar(13, "Family", "sam@example.com", syncs = true, primary = false)
+        val work = PhonePlaces.WritableCalendar(20, "sam@work.example", "sam@work.example", syncs = true, primary = true)
+
+        assertEquals(sam, PhonePlaces.pickCalendar(listOf(onPhone, family, sam), null))
+        assertEquals(onPhone, PhonePlaces.pickCalendar(listOf(onPhone), null))
+        assertEquals(family, PhonePlaces.pickCalendar(listOf(onPhone, family), null))
+        assertNull(PhonePlaces.pickCalendar(listOf(onPhone, sam, family, work), null))
+        assertNull(PhonePlaces.pickCalendar(emptyList(), null))
+    }
+
+    @Test fun aNamedCalendarIsFoundByNameOrAccount() {
+        val onPhone = PhonePlaces.WritableCalendar(1, "My calendar", "My calendar", syncs = false, primary = true)
+        val sam = PhonePlaces.WritableCalendar(4, "sam@example.com", "sam@example.com", syncs = true, primary = true)
+        val family = PhonePlaces.WritableCalendar(13, "Family", "sam@example.com", syncs = true, primary = false)
+        val work = PhonePlaces.WritableCalendar(20, "sam@work.example", "sam@work.example", syncs = true, primary = true)
+        val all = listOf(onPhone, sam, family, work)
+
+        assertEquals(work, PhonePlaces.pickCalendar(all, "SAM@work.example"))
+        assertEquals(sam, PhonePlaces.pickCalendar(all, "sam@example.com"))
+        assertEquals(family, PhonePlaces.pickCalendar(all, "family"))
+        assertEquals(family, PhonePlaces.pickCalendar(all, "Family, sam@example.com"))
+        assertEquals(onPhone, PhonePlaces.pickCalendar(all, "My calendar"))
+        assertNull(PhonePlaces.pickCalendar(all, "Holidays"))
+        assertEquals(
+            "The phone has several calendars and the user didn’t say which, so nothing was added. " +
+                "Ask the user which one, then call again with calendar. " +
+                "The calendars: My calendar, on this phone only; sam@example.com; Family, sam@example.com; sam@work.example.",
+            PhonePlaces.whichCalendar(all, null),
+        )
+        assertEquals(
+            "“Holidays” doesn’t name one calendar on the phone, so nothing was added. " +
+                "Ask the user which one they mean, then call again with calendar. " +
+                "The calendars: My calendar, on this phone only; sam@example.com.",
+            PhonePlaces.whichCalendar(listOf(onPhone, sam), "Holidays"),
+        )
     }
 
     @Test fun callsAndTextsWaitForTheUser() = runTest {

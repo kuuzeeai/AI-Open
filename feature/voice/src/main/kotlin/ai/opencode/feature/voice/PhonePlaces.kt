@@ -48,10 +48,14 @@ internal object PhonePlaces {
         val end = call.end.atZone(eventZone).toInstant().toEpochMilli()
         val shown = span(call)
         if (canWrite) {
-            val calendar = writableCalendar()
+            val calendars = writableCalendars()
+            val calendar = pickCalendar(calendars, call.calendar)
+            if (calendar == null && calendars.isNotEmpty()) {
+                return PhoneTools.Result.failure(whichCalendar(calendars, call.calendar))
+            }
             if (calendar != null) {
                 val values = ContentValues()
-                values.put(CalendarContract.Events.CALENDAR_ID, calendar.first)
+                values.put(CalendarContract.Events.CALENDAR_ID, calendar.id)
                 values.put(CalendarContract.Events.TITLE, call.title)
                 values.put(CalendarContract.Events.DTSTART, begin)
                 values.put(CalendarContract.Events.DTEND, end)
@@ -67,10 +71,11 @@ internal object PhonePlaces {
                         "end" to JsonPrimitive(PhoneDetails.minute.format(call.end)),
                         "all_day" to JsonPrimitive(call.allDay),
                         "time_zone" to if (call.allDay) null else JsonPrimitive(zone.id),
-                        "calendar" to JsonPrimitive(calendar.second),
+                        "calendar" to JsonPrimitive(calendar.name),
+                        "account" to if (calendar.syncs) JsonPrimitive(calendar.account) else null,
                     )
                     return PhoneTools.Result(
-                        PhoneDetails.text("Added “${call.title}” to the calendar (${calendar.second}): $shown$at.", details),
+                        PhoneDetails.text("Added “${call.title}” to the calendar (${calendar.label}): $shown$at.", details),
                         action = PhoneTools.Action.other("Added to the calendar"),
                     )
                 }
@@ -83,10 +88,14 @@ internal object PhonePlaces {
             .putExtra(CalendarContract.Events.TITLE, call.title)
         if (call.location != null) intent.putExtra(CalendarContract.Events.EVENT_LOCATION, call.location)
         if (call.notes != null) intent.putExtra(CalendarContract.Events.DESCRIPTION, call.notes)
-        val app = PhoneLaunch.handlerName(intent) ?: "Calendar"
+        val app = PhoneLaunch.handlerName(intent)
         return when (PhoneLaunch.start(intent)) {
             PhoneLaunch.Launch.started -> PhoneTools.Result(
-                "Opened $app with “${call.title}” filled in for $shown. The user has to tap save.",
+                if (app == null) {
+                    "The phone is asking the user which app to add “${call.title}” ($shown) with. They pick a calendar app, then tap save."
+                } else {
+                    "Opened $app with “${call.title}” filled in for $shown. The user has to tap save."
+                },
                 action = PhoneTools.Action.other("Opened a new event"),
             )
             PhoneLaunch.Launch.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
@@ -394,15 +403,32 @@ internal object PhonePlaces {
         }
     }
 
-    /** The primary writable calendar, else the first visible one the phone may add to: its ID and name. */
-    private fun writableCalendar(): Pair<Long, String>? {
+    /** A visible calendar the phone may add events to. [syncs] is false for one kept on this phone only. */
+    internal data class WritableCalendar(
+        val id: Long,
+        val name: String,
+        val account: String,
+        val syncs: Boolean,
+        val primary: Boolean,
+    ) {
+        /** “Family, sam@example.com”, or the name alone when it is the account's own calendar. */
+        val label: String get() {
+            if (!syncs) return "$name, on this phone only"
+            if (name == account) return name
+            return "$name, $account"
+        }
+    }
+
+    private fun writableCalendars(): List<WritableCalendar> {
         val context = dependency(AppContext)
-        var fallback: Pair<Long, String>? = null
+        val calendars = mutableListOf<WritableCalendar>()
         context.contentResolver.query(
             CalendarContract.Calendars.CONTENT_URI,
             arrayOf(
                 CalendarContract.Calendars._ID,
                 CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+                CalendarContract.Calendars.ACCOUNT_NAME,
+                CalendarContract.Calendars.ACCOUNT_TYPE,
                 CalendarContract.Calendars.IS_PRIMARY,
             ),
             "${CalendarContract.Calendars.VISIBLE} = 1 AND ${CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL} >= ?",
@@ -410,12 +436,67 @@ internal object PhonePlaces {
             null,
         )?.use { cursor ->
             while (cursor.moveToNext()) {
-                val calendar = Pair(cursor.getLong(0), cursor.getString(1) ?: "Calendar")
-                if (cursor.getInt(2) == 1) return calendar
-                if (fallback == null) fallback = calendar
+                calendars += WritableCalendar(
+                    id = cursor.getLong(0),
+                    name = cursor.getString(1) ?: "Calendar",
+                    account = cursor.getString(2) ?: "",
+                    syncs = cursor.getString(3) != CalendarContract.ACCOUNT_TYPE_LOCAL,
+                    primary = cursor.getInt(4) == 1,
+                )
             }
         }
-        return fallback
+        return calendars
+    }
+
+    /**
+     * The calendar a new event goes in. [wanted] names one by its name, its label or its account
+     * (an account means its primary calendar). Without [wanted] it is the only account's primary
+     * calendar, and a calendar kept on this phone only when no account has one. Null when
+     * [wanted] names none or several, or when several fit and none was named.
+     */
+    internal fun pickCalendar(calendars: List<WritableCalendar>, wanted: String?): WritableCalendar? {
+        if (wanted != null) {
+            val named = mutableListOf<WritableCalendar>()
+            val inAccount = mutableListOf<WritableCalendar>()
+            val primaryInAccount = mutableListOf<WritableCalendar>()
+            for (calendar in calendars) {
+                if (calendar.name.equals(wanted, ignoreCase = true) || calendar.label.equals(wanted, ignoreCase = true)) {
+                    named += calendar
+                }
+                if (calendar.account.equals(wanted, ignoreCase = true)) {
+                    inAccount += calendar
+                    if (calendar.primary) primaryInAccount += calendar
+                }
+            }
+            if (named.isNotEmpty()) return named.singleOrNull()
+            if (primaryInAccount.isNotEmpty()) return primaryInAccount.singleOrNull()
+            return inAccount.singleOrNull()
+        }
+        val synced = mutableListOf<WritableCalendar>()
+        val primarySynced = mutableListOf<WritableCalendar>()
+        for (calendar in calendars) {
+            if (!calendar.syncs) continue
+            synced += calendar
+            if (calendar.primary) primarySynced += calendar
+        }
+        if (primarySynced.isNotEmpty()) return primarySynced.singleOrNull()
+        if (synced.isNotEmpty()) return synced.singleOrNull()
+        return calendars.singleOrNull()
+    }
+
+    /** What the model reads when [pickCalendar] found no single calendar: the choices to ask the user about. */
+    internal fun whichCalendar(calendars: List<WritableCalendar>, wanted: String?): String {
+        val labels = mutableListOf<String>()
+        for (calendar in calendars) {
+            labels += calendar.label
+        }
+        val choices = "The calendars: ${labels.joinToString("; ")}."
+        if (wanted == null) {
+            return "The phone has several calendars and the user didn’t say which, so nothing was added. " +
+                "Ask the user which one, then call again with calendar. $choices"
+        }
+        return "“$wanted” doesn’t name one calendar on the phone, so nothing was added. " +
+            "Ask the user which one they mean, then call again with calendar. $choices"
     }
 
     /** “Thu 12 Nov, 19:00–20:00”, or “Thu 12 Nov, all day”. */

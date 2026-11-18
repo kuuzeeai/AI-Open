@@ -132,7 +132,10 @@ object PhoneTools {
         /** [from] is a contact's name or a number. */
         data class ReadTexts(val from: String?, val unreadOnly: Boolean, val limit: Int) : Call("read_texts")
 
-        /** All-day events have no times: [start] and [end] are midnight. [end] is filled in when it was left out. */
+        /**
+         * All-day events have no times: [start] and [end] are midnight. [end] is filled in when it was left out.
+         * [calendar] is a calendar's name or an account; null leaves the choice to the phone.
+         */
         data class AddCalendarEvent(
             val title: String,
             val start: LocalDateTime,
@@ -140,6 +143,7 @@ object PhoneTools {
             val allDay: Boolean,
             val location: String?,
             val notes: String?,
+            val calendar: String?,
         ) : Call("add_calendar_event")
 
         data class ListCalendarEvents(val start: LocalDateTime, val end: LocalDateTime) : Call("list_calendar_events")
@@ -618,7 +622,7 @@ object PhoneTools {
                 }
                 val begin = if (allDay) start.first.toLocalDate().atStartOfDay() else start.first
                 if (!end.isAfter(begin)) return Invalid("end must be after start.")
-                Call.AddCalendarEvent(title, begin, end, allDay, args.text("location"), args.text("notes"))
+                Call.AddCalendarEvent(title, begin, end, allDay, args.text("location"), args.text("notes"), args.text("calendar"))
             }
 
             ClientTool.listCalendarEvents -> {

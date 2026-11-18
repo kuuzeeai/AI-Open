@@ -7,7 +7,7 @@ import kotlinx.serialization.json.jsonObject
 /**
  * The assistant's phone tools as the session sees them (Android only): description, input schema
  * and MCP hints for each, copied verbatim from opencode-phone `scripts/tools.ts` (ANDROID.md v3,
- * feb8915). Generated; to change a tool, change it there, rerun its eval, then regenerate this.
+ * ad42b54). Generated; to change a tool, change it there, rerun its eval, then regenerate this.
  * The description's first line is what Code Mode's catalog shows, so keep the line break.
  */
 object PhoneToolSpecs {
@@ -172,8 +172,8 @@ object PhoneToolSpecs {
             "{\"readOnlyHint\":false,\"destructiveHint\":true}",
         ),
         "add_calendar_event" to Spec(
-            "Add an event to the user’s phone calendar.\nUse when the user asks to add, schedule or put something on their calendar. Ask for the day or time if missing; never guess. Times are the phone’s local time, “YYYY-MM-DDTHH:MM” (or “YYYY-MM-DD” with all_day); work out “tomorrow” and weekdays from today’s date. Without an end it lasts an hour. With calendar permission the phone adds it directly; otherwise it opens the calendar filled in and the user taps save, and the result says which. The result also gives the start, end, time zone and calendar.",
-            "{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"start\":{\"type\":\"string\",\"description\":\"“2026-11-12T19:00”, or “2026-11-12” for an all-day event.\"},\"end\":{\"type\":\"string\",\"description\":\"Same format. Leave out for an hour (or one day when all_day).\"},\"all_day\":{\"type\":\"boolean\"},\"location\":{\"type\":\"string\"},\"notes\":{\"type\":\"string\"}},\"required\":[\"title\",\"start\"]}",
+            "Add an event to the user’s phone calendar.\nUse when the user asks to add, schedule or put something on their calendar. Ask for the day or time if missing; never guess. Times are the phone’s local time, “YYYY-MM-DDTHH:MM” (or “YYYY-MM-DD” with all_day); work out “tomorrow” and weekdays from today’s date. Without an end it lasts an hour. With calendar permission the phone adds it directly; otherwise it opens the calendar filled in and the user taps save, and the result says which. The result also gives the start, end, time zone and calendar. Pass calendar only when the user names one (“my work calendar”, an account, “Family”). When the phone has several accounts and none was named, nothing is added and the result lists the calendars: ask the user which, then call again with calendar.",
+            "{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"start\":{\"type\":\"string\",\"description\":\"“2026-11-12T19:00”, or “2026-11-12” for an all-day event.\"},\"end\":{\"type\":\"string\",\"description\":\"Same format. Leave out for an hour (or one day when all_day).\"},\"all_day\":{\"type\":\"boolean\"},\"location\":{\"type\":\"string\"},\"notes\":{\"type\":\"string\"},\"calendar\":{\"type\":\"string\",\"description\":\"A calendar’s name or its account, as a result or list_calendar_events gives it. Leave out unless the user named one.\"}},\"required\":[\"title\",\"start\"]}",
             "{\"readOnlyHint\":false,\"destructiveHint\":false}",
         ),
         "list_calendar_events" to Spec(
