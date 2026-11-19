@@ -70,11 +70,11 @@ internal object PhoneInbox {
         PhoneAccess.require(context, PhoneAccess.readTexts.permissions, "read texts")?.let { return it }
         val wanted = numbersFor(context, call.from, "texts")
         if (wanted is Wanted.Stop) return wanted.result
-        val numbers = (wanted as Wanted.Numbers).numbers
+        val filter = wanted as Wanted.Filter
 
         val messages = mutableListOf<Message>()
-        val smsTotal = readSms(context, call, numbers, messages)
-        val mmsTotal = readMms(context, call, numbers, messages)
+        val smsTotal = readSms(context, call, filter, messages)
+        val mmsTotal = readMms(context, call, filter, messages)
         messages.sortByDescending { it.time }
         val total = smsTotal + mmsTotal
 
@@ -107,9 +107,14 @@ internal object PhoneInbox {
         val context = dependency(AppContext)
         if (!PhoneAccess.isAssistant(context)) return PhoneTools.Result.failure(CALLS_NEED_ASSISTANT)
         PhoneAccess.require(context, PhoneAccess.callLog.permissions, "read the call log")?.let { return it }
-        // The call log keeps the contact's name, so a name needs no Contacts access here.
-        val from = call.from?.trim()
+        val from = call.from?.trim()?.ifEmpty { null }
         val fromNumber = from != null && PhoneTools.isPhoneNumber(from)
+        val contactNumbers = if (from != null && !fromNumber && PhoneAccess.isGranted(context, PhoneAccess.contacts)) {
+            contactNumbersFor(context, from)
+        } else {
+            emptyList()
+        }
+        val names = Names(context)
         var selection: String? = null
         var selectionArgs: Array<String>? = null
         when (call.type) {
@@ -154,12 +159,14 @@ internal object PhoneInbox {
                 scanned += 1
                 if (from != null && scanned > MAX_SCANNED) break
                 val number = cursor.getString(0)
-                val name = cursor.getString(1)
+                val cachedName = cursor.getString(1)?.trim()?.ifEmpty { null }
+                val name = cachedName ?: names.contactName(number)
                 if (from != null) {
                     val matches = if (fromNumber) {
                         number != null && PhoneNumberUtils.compare(number, from)
                     } else {
-                        name != null && name.lowercase().contains(from.lowercase())
+                        (name != null && name.lowercase().contains(from.lowercase())) ||
+                            (number != null && contactNumbers.any { PhoneNumberUtils.compare(number, it) })
                     }
                     if (!matches) continue
                 }
@@ -195,43 +202,77 @@ internal object PhoneInbox {
         else -> "other"
     }
 
-    /** The numbers a `from` filter means: none (no filter), the number itself, or a contact's numbers. */
+    /** The numbers and/or alphanumeric sender text a `from` filter means. */
     private sealed interface Wanted {
-        data class Numbers(val numbers: List<String>?) : Wanted
+        data class Filter(val numbers: List<String>?, val senderText: String?) : Wanted {
+            val active: Boolean get() = numbers != null || senderText != null
+        }
+
         data class Stop(val result: PhoneTools.Result) : Wanted
     }
 
     private fun numbersFor(context: Context, from: String?, what: String): Wanted {
         val wanted = from?.trim()
-        if (wanted.isNullOrEmpty()) return Wanted.Numbers(null)
-        if (PhoneTools.isPhoneNumber(wanted)) return Wanted.Numbers(listOf(wanted))
-        // A name: its numbers come from Contacts.
-        PhoneAccess.require(context, PhoneAccess.contacts.permissions, "find who sent the $what")?.let { return Wanted.Stop(it) }
+        if (wanted.isNullOrEmpty()) return Wanted.Filter(null, null)
+        if (PhoneTools.isPhoneNumber(wanted)) return Wanted.Filter(listOf(wanted), null)
+        if (!PhoneAccess.isGranted(context, PhoneAccess.contacts)) {
+            if (hasAlphanumericSender(context, wanted)) return Wanted.Filter(emptyList(), wanted)
+            PhoneAccess.require(context, PhoneAccess.contacts.permissions, "find who sent the $what")?.let { return Wanted.Stop(it) }
+        }
+        val numbers = contactNumbersFor(context, wanted)
+        // Match both the contact's phone numbers and alphanumeric senders such as "UBER".
+        return Wanted.Filter(numbers, wanted)
+    }
+
+    private fun contactNumbersFor(context: Context, query: String): List<String> {
         val numbers = mutableListOf<String>()
-        val uri = Uri.withAppendedPath(ContactsContract.CommonDataKinds.Phone.CONTENT_FILTER_URI, Uri.encode(wanted))
+        val uri = Uri.withAppendedPath(ContactsContract.CommonDataKinds.Phone.CONTENT_FILTER_URI, Uri.encode(query))
         context.contentResolver.query(uri, arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use { cursor ->
             while (cursor.moveToNext()) {
                 val number = cursor.getString(0)
                 if (number != null) numbers += number
             }
         }
-        if (numbers.isEmpty()) {
-            return Wanted.Stop(PhoneTools.Result.failure("No contact named “$wanted” with a phone number. Use find_contact, or give the number."))
-        }
-        return Wanted.Numbers(numbers)
+        return numbers
     }
 
-    private fun matches(number: String?, numbers: List<String>?): Boolean {
-        if (numbers == null) return true
-        if (number == null) return false
-        for (wanted in numbers) {
-            if (PhoneNumberUtils.compare(number, wanted)) return true
+    private fun hasAlphanumericSender(context: Context, sender: String): Boolean {
+        var scanned = 0
+        context.contentResolver.query(
+            Telephony.Sms.CONTENT_URI,
+            arrayOf(Telephony.Sms.ADDRESS),
+            null,
+            null,
+            "${Telephony.Sms.DATE} DESC",
+        )?.use { cursor ->
+            while (cursor.moveToNext() && scanned < MAX_SCANNED) {
+                scanned += 1
+                val address = cursor.getString(0) ?: continue
+                if (address.equals(sender, ignoreCase = true) || address.contains(sender, ignoreCase = true)) return true
+            }
+        }
+        return false
+    }
+
+    private fun matches(addresses: List<String>, filter: Wanted.Filter): Boolean {
+        if (!filter.active) return true
+        for (address in addresses) {
+            val numbers = filter.numbers
+            if (numbers != null) {
+                for (wanted in numbers) {
+                    if (PhoneNumberUtils.compare(address, wanted)) return true
+                }
+            }
+            val senderText = filter.senderText
+            if (senderText != null && (address.equals(senderText, ignoreCase = true) || address.contains(senderText, ignoreCase = true))) {
+                return true
+            }
         }
         return false
     }
 
     /** Adds the matching SMS to [into], at most the limit; returns how many matched in all. */
-    private fun readSms(context: Context, call: PhoneTools.Call.ReadTexts, numbers: List<String>?, into: MutableList<Message>): Int {
+    private fun readSms(context: Context, call: PhoneTools.Call.ReadTexts, filter: Wanted.Filter, into: MutableList<Message>): Int {
         val selection = if (call.unreadOnly) "${Telephony.Sms.READ} = 0" else null
         var total = 0
         var kept = 0
@@ -245,9 +286,10 @@ internal object PhoneInbox {
         )?.use { cursor ->
             while (cursor.moveToNext()) {
                 scanned += 1
-                if (numbers != null && scanned > MAX_SCANNED) break
+                if (filter.active && scanned > MAX_SCANNED) break
                 val number = cursor.getString(0)
-                if (!matches(number, numbers)) continue
+                val addresses = if (number == null) emptyList() else listOf(number)
+                if (!matches(addresses, filter)) continue
                 total += 1
                 if (kept >= call.limit) continue
                 kept += 1
@@ -265,7 +307,7 @@ internal object PhoneInbox {
     }
 
     /** Adds the matching MMS to [into], at most the limit; returns how many matched in all. */
-    private fun readMms(context: Context, call: PhoneTools.Call.ReadTexts, numbers: List<String>?, into: MutableList<Message>): Int {
+    private fun readMms(context: Context, call: PhoneTools.Call.ReadTexts, filter: Wanted.Filter, into: MutableList<Message>): Int {
         val selection = if (call.unreadOnly) "${Telephony.Mms.READ} = 0" else null
         var total = 0
         var kept = 0
@@ -280,8 +322,8 @@ internal object PhoneInbox {
         )?.use { cursor ->
             while (cursor.moveToNext()) {
                 scanned += 1
-                if (numbers != null && scanned > MAX_SCANNED) break
-                if (kept >= call.limit && numbers == null) {
+                if (filter.active && scanned > MAX_SCANNED) break
+                if (kept >= call.limit && !filter.active) {
                     // Past the limit only the count matters.
                     total += 1
                     continue
@@ -289,8 +331,14 @@ internal object PhoneInbox {
                 val id = cursor.getLong(0)
                 val box = cursor.getInt(2)
                 val received = box == Telephony.Mms.MESSAGE_BOX_INBOX
-                val number = mmsAddress(context, id, if (received) MMS_FROM else MMS_TO)
-                if (!matches(number, numbers)) continue
+                val primary = mmsAddresses(context, id, if (received) MMS_FROM else MMS_TO)
+                val allParticipants = if (filter.active) {
+                    (primary + mmsAddresses(context, id, if (received) MMS_TO else MMS_FROM)).distinct()
+                } else {
+                    primary
+                }
+                if (!matches(allParticipants, filter)) continue
+                val number = primary.firstOrNull()
                 total += 1
                 if (kept >= call.limit) continue
                 kept += 1
@@ -327,7 +375,8 @@ internal object PhoneInbox {
         return total
     }
 
-    private fun mmsAddress(context: Context, id: Long, type: Int): String? {
+    private fun mmsAddresses(context: Context, id: Long, type: Int): List<String> {
+        val result = mutableListOf<String>()
         context.contentResolver.query(
             Uri.parse("content://mms/$id/addr"),
             arrayOf(Telephony.Mms.Addr.ADDRESS),
@@ -335,9 +384,12 @@ internal object PhoneInbox {
             arrayOf(type.toString()),
             null,
         )?.use { cursor ->
-            if (cursor.moveToFirst()) return cursor.getString(0)
+            while (cursor.moveToNext()) {
+                val addr = cursor.getString(0)?.trim()
+                if (!addr.isNullOrEmpty() && addr != "insert-address-token") result += addr
+            }
         }
-        return null
+        return result
     }
 
     private fun smsDirection(type: Int): String = when (type) {
@@ -362,9 +414,9 @@ internal object PhoneInbox {
         private val allowed = PhoneAccess.isGranted(context, PhoneAccess.contacts)
         private val known = mutableMapOf<String, String?>()
 
-        fun of(number: String?): String? {
-            if (number == null || !allowed) return number
-            if (known.containsKey(number)) return known[number] ?: number
+        fun contactName(number: String?): String? {
+            if (number == null || !allowed) return null
+            if (known.containsKey(number)) return known[number]
             var name: String? = null
             val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(number))
             runCatching {
@@ -373,7 +425,9 @@ internal object PhoneInbox {
                 }
             }
             known[number] = name
-            return name ?: number
+            return name
         }
+
+        fun of(number: String?): String? = contactName(number) ?: number
     }
 }

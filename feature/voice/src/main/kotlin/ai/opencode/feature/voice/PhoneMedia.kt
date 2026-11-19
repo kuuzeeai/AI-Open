@@ -62,14 +62,8 @@ internal object PhoneMedia {
                 controls.pause()
                 settled(session, wantsPlaying = false, "Paused.", "$app is still playing after asking it to pause.")
             }
-            "next" -> {
-                controls.skipToNext()
-                settled(session, wantsPlaying = true, "Skipped to the next track.", "Nothing is playing after asking $app to skip: $NOTHING_READY")
-            }
-            "previous" -> {
-                controls.skipToPrevious()
-                settled(session, wantsPlaying = true, "Went back a track.", "Nothing is playing after asking $app to go back: $NOTHING_READY")
-            }
+            "next" -> skip(session, app, next = true)
+            "previous" -> skip(session, app, next = false)
             "stop" -> {
                 controls.stop()
                 settled(session, wantsPlaying = false, "Stopped.", "$app is still playing after asking it to stop.")
@@ -86,6 +80,24 @@ internal object PhoneMedia {
             "shuffle" -> shuffle(session, app, call.shuffle == true)
             else -> repeat(session, app, call.repeat ?: "off")
         }
+    }
+
+    private suspend fun skip(session: MediaController, app: String, next: Boolean): PhoneTools.Result {
+        val flag = if (next) PlaybackState.ACTION_SKIP_TO_NEXT else PlaybackState.ACTION_SKIP_TO_PREVIOUS
+        val actions = session.playbackState?.actions ?: 0L
+        if (actions != 0L && actions and flag == 0L) {
+            return PhoneTools.Result.failure("$app doesn’t let other apps skip tracks.")
+        }
+        val wasPlaying = isPlaying(session)
+        if (next) session.transportControls.skipToNext() else session.transportControls.skipToPrevious()
+        val done = if (next) "Skipped to the next track." else "Went back a track."
+        if (wasPlaying) {
+            val verb = if (next) "skip" else "go back"
+            return settled(session, wantsPlaying = true, done, "Nothing is playing after asking $app to $verb: $NOTHING_READY")
+        }
+        delay(SETTLE_MILLIS)
+        val details = mapOf("now_playing" to PhoneDevice.nowPlaying())
+        return PhoneTools.Result(PhoneDetails.text(done, details), action = PhoneTools.Action.other(done.removeSuffix(".")))
     }
 
     /** Waits for the session to play (or stop playing), then answers with what's playing now. */

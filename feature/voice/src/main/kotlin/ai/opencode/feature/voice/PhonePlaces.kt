@@ -12,6 +12,9 @@ import android.location.LocationManager
 import android.net.Uri
 import android.os.CancellationSignal
 import android.provider.CalendarContract
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -19,6 +22,9 @@ import java.util.Locale
 import kotlin.coroutines.resume
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
@@ -31,6 +37,8 @@ internal object PhonePlaces {
     private const val MAX_EVENTS = 50
     private const val MAX_ATTENDEES = 15
     private const val MAX_DESCRIPTION = 600
+    private const val DEFAULT_REMINDER_MINUTES = 10
+    private const val DAY_MILLIS = 86_400_000L
     private const val FRESH_MILLIS = 2 * 60 * 1000L
     private val fixWait = 10.seconds
     private val addressWait = 3.seconds
@@ -65,6 +73,14 @@ internal object PhonePlaces {
                 if (call.notes != null) values.put(CalendarContract.Events.DESCRIPTION, call.notes)
                 val added = runCatching { context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values) }.getOrNull()
                 if (added != null) {
+                    val eventID = runCatching { ContentUris.parseId(added) }.getOrNull()
+                    if (eventID != null && !call.allDay) {
+                        val reminder = ContentValues()
+                        reminder.put(CalendarContract.Reminders.EVENT_ID, eventID)
+                        reminder.put(CalendarContract.Reminders.MINUTES, DEFAULT_REMINDER_MINUTES)
+                        reminder.put(CalendarContract.Reminders.METHOD, CalendarContract.Reminders.METHOD_ALERT)
+                        runCatching { context.contentResolver.insert(CalendarContract.Reminders.CONTENT_URI, reminder) }
+                    }
                     val at = if (call.location == null) "" else " at ${call.location}"
                     val details = mapOf(
                         "start" to JsonPrimitive(PhoneDetails.minute.format(call.start)),
@@ -115,8 +131,9 @@ internal object PhonePlaces {
         val begin = call.start.atZone(zone).toInstant().toEpochMilli()
         val end = call.end.atZone(zone).toInstant().toEpochMilli()
         val uri = CalendarContract.Instances.CONTENT_URI.buildUpon()
-        ContentUris.appendId(uri, begin)
-        ContentUris.appendId(uri, end)
+        // Widen by a day each side so UTC-stored all-day events are never missed in any timezone.
+        ContentUris.appendId(uri, begin - DAY_MILLIS)
+        ContentUris.appendId(uri, end + DAY_MILLIS)
         val events = mutableListOf<JsonObject>()
         var total = 0
         context.contentResolver.query(
@@ -137,15 +154,19 @@ internal object PhonePlaces {
                 CalendarContract.Instances.AVAILABILITY,
                 CalendarContract.Instances.STATUS,
                 CalendarContract.Instances.SELF_ATTENDEE_STATUS,
+                CalendarContract.Instances.RDATE,
             ),
             "${CalendarContract.Instances.VISIBLE} = 1",
             null,
             "${CalendarContract.Instances.BEGIN} ASC",
         )?.use { cursor ->
             while (cursor.moveToNext()) {
+                val rowBegin = cursor.getLong(1)
+                val rowEnd = cursor.getLong(2)
+                val allDay = cursor.getInt(3) == 1
+                if (!instanceInRange(rowBegin, rowEnd, allDay, call.start, call.end, begin, end)) continue
                 total += 1
                 if (events.size >= MAX_EVENTS) continue
-                val allDay = cursor.getInt(3) == 1
                 // All-day instances are stored at UTC midnights.
                 val shownZone = if (allDay) ZoneOffset.UTC else zone
                 val eventID = cursor.getLong(6)
@@ -153,14 +174,16 @@ internal object PhonePlaces {
                 val description = cursor.getString(7)
                 val account = cursor.getString(9)
                 val organizer = cursor.getString(10)
+                val rrule = cursor.getString(11)
+                val rdate = cursor.getString(15)
                 // A repeating event's occurrences share its ID, so the occurrence's start picks one.
-                val repeats = cursor.getString(11) != null
-                val id = PhoneTools.EventID(eventID, if (repeats) cursor.getLong(1) else null)
+                val repeats = rrule != null || rdate != null
+                val id = PhoneTools.EventID(eventID, if (repeats) rowBegin else null)
                 val details = mapOf(
                     "event_id" to JsonPrimitive(id.toString()),
                     "title" to JsonPrimitive(cursor.getString(0) ?: ""),
-                    "start" to JsonPrimitive(PhoneDetails.local(cursor.getLong(1), shownZone)),
-                    "end" to JsonPrimitive(PhoneDetails.local(cursor.getLong(2), shownZone)),
+                    "start" to JsonPrimitive(PhoneDetails.local(rowBegin, shownZone)),
+                    "end" to JsonPrimitive(PhoneDetails.local(rowEnd, shownZone)),
                     "all_day" to JsonPrimitive(allDay),
                     "time_zone" to if (allDay) null else PhoneDetails.string(cursor.getString(8)),
                     "location" to PhoneDetails.string(location),
@@ -169,7 +192,7 @@ internal object PhonePlaces {
                     "calendar" to PhoneDetails.string(cursor.getString(5)),
                     "account" to PhoneDetails.string(account),
                     "organizer" to if (organizer != null && organizer != account) PhoneDetails.string(organizer) else null,
-                    "repeats" to PhoneDetails.string(cursor.getString(11)),
+                    "repeats" to PhoneDetails.string(rrule ?: if (rdate != null) "RDATE" else null),
                     "availability" to JsonPrimitive(
                         when (cursor.getInt(12)) {
                             CalendarContract.Events.AVAILABILITY_FREE -> "free"
@@ -189,6 +212,27 @@ internal object PhonePlaces {
         val more = PhoneDetails.more(total, MAX_EVENTS)
         if (more != null) result["more_events"] = more
         return PhoneTools.Result(JsonObject(result).toString())
+    }
+
+    internal fun instanceInRange(
+        rowBegin: Long,
+        rowEnd: Long,
+        allDay: Boolean,
+        rangeStart: LocalDateTime,
+        rangeEnd: LocalDateTime,
+        beginMillis: Long,
+        endMillis: Long,
+    ): Boolean {
+        if (allDay) {
+            val eventStart = Instant.ofEpochMilli(rowBegin).atOffset(ZoneOffset.UTC).toLocalDate()
+            val rawEnd = Instant.ofEpochMilli(rowEnd).atOffset(ZoneOffset.UTC).toLocalDate()
+            val eventEnd = if (rawEnd.isAfter(eventStart)) rawEnd else eventStart.plusDays(1)
+            val queryStart = rangeStart.toLocalDate()
+            val queryEnd = if (rangeEnd.toLocalTime() == LocalTime.MIDNIGHT) rangeEnd.toLocalDate() else rangeEnd.toLocalDate().plusDays(1)
+            return eventStart.isBefore(queryEnd) && eventEnd.isAfter(queryStart)
+        }
+        if (rowBegin == rowEnd) return rowBegin in beginMillis..endMillis
+        return rowBegin < endMillis && rowEnd > beginMillis
     }
 
     private fun response(status: Int): String? = when (status) {
@@ -265,10 +309,15 @@ internal object PhonePlaces {
                 "bicycling" -> "cycling"
                 else -> "driving"
             }
+            val chooser = PhoneLaunch.isChooser(intent)
             val app = PhoneLaunch.handlerName(intent) ?: "Maps"
             when (PhoneLaunch.start(intent)) {
                 PhoneLaunch.Launch.started -> return PhoneTools.Result(
-                    "Opened $kind directions to “${call.place}” in $app.",
+                    if (chooser) {
+                        "The phone is asking the user which app to open $kind directions to “${call.place}” with."
+                    } else {
+                        "Opened $kind directions to “${call.place}” in $app."
+                    },
                     action = PhoneTools.Action.other("Opened directions"),
                 )
                 PhoneLaunch.Launch.blocked -> return PhoneTools.Result.failure(PhoneTools.BLOCKED)
@@ -276,10 +325,15 @@ internal object PhonePlaces {
                 PhoneLaunch.Launch.noApp -> Unit
             }
         }
+        val chooser = PhoneLaunch.isChooser(search)
         val app = PhoneLaunch.handlerName(search) ?: "Maps"
         return when (PhoneLaunch.start(search)) {
             PhoneLaunch.Launch.started -> PhoneTools.Result(
-                "Opened $app searching for “${call.place}”.",
+                if (chooser) {
+                    "The phone is asking the user which app to search for “${call.place}” with."
+                } else {
+                    "Opened $app searching for “${call.place}”."
+                },
                 action = PhoneTools.Action.other("Opened Maps"),
             )
             PhoneLaunch.Launch.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
@@ -299,23 +353,22 @@ internal object PhonePlaces {
         val fine = PhoneAccess.granted(context, Manifest.permission.ACCESS_FINE_LOCATION)
         val providers = mutableListOf<String>()
         if (locations.hasProvider(LocationManager.FUSED_PROVIDER)) providers += LocationManager.FUSED_PROVIDER
-        providers += LocationManager.NETWORK_PROVIDER
-        if (fine) providers += LocationManager.GPS_PROVIDER
+        if (locations.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) providers += LocationManager.NETWORK_PROVIDER
+        if (fine && locations.isProviderEnabled(LocationManager.GPS_PROVIDER)) providers += LocationManager.GPS_PROVIDER
         var fix: Location? = null
         try {
-            for (provider in providers) {
-                if (!locations.isProviderEnabled(provider) && provider != LocationManager.FUSED_PROVIDER) continue
-                fix = withTimeoutOrNull(fixWait) { current(locations, provider) }
-                if (fix != null) break
+            if (providers.isNotEmpty()) {
+                fix = withTimeoutOrNull(fixWait) { raceProviders(locations, providers) }
             }
             if (fix == null) {
+                var freshest: Location? = null
+                val now = System.currentTimeMillis()
                 for (provider in providers) {
                     val last = locations.getLastKnownLocation(provider) ?: continue
-                    if (System.currentTimeMillis() - last.time < FRESH_MILLIS) {
-                        fix = last
-                        break
-                    }
+                    if (now - last.time >= FRESH_MILLIS) continue
+                    if (freshest == null || last.time > freshest.time) freshest = last
                 }
+                fix = freshest
             }
         } catch (_: SecurityException) {
             return PhoneTools.Result.failure(PhoneTools.needsPermission("use the location"))
@@ -361,6 +414,26 @@ internal object PhonePlaces {
         if (name.all { it.isDigit() || it == '-' || it == ' ' }) return null
         if (place.getAddressLine(0)?.startsWith(name) == true && name.length < 6) return null
         return name
+    }
+
+    private suspend fun raceProviders(locations: LocationManager, providers: List<String>): Location? = coroutineScope {
+        val winner = CompletableDeferred<Location?>()
+        var pending = providers.size
+        val jobs = mutableListOf<kotlinx.coroutines.Job>()
+        for (provider in providers) {
+            jobs += launch {
+                val found = current(locations, provider)
+                if (found != null) {
+                    winner.complete(found)
+                } else {
+                    pending -= 1
+                    if (pending <= 0) winner.complete(null)
+                }
+            }
+        }
+        val result = winner.await()
+        for (job in jobs) job.cancel()
+        result
     }
 
     private suspend fun current(locations: LocationManager, provider: String): Location? =

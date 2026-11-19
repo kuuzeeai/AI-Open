@@ -98,8 +98,13 @@ internal object PhoneScreen {
         AppLog.app.info { "Screen read asked call=${call != null} sharing=${ScreenShare.isSharing(call)}" }
         if (call == null || assistEmptyFor != call) {
             val assist = dependency(AssistantPanelClient).readScreen()
-            if (assist != null && (assist.info != null || assist.screenshot != null)) {
-                AppLog.app.info { "Screen read source=assist text=${assist.info != null} screenshot=${assist.screenshot != null}" }
+            val hasText = !assist?.info?.text.isNullOrBlank()
+            val hasShot = assist?.screenshot != null
+            if (assist != null && (hasText || hasShot)) {
+                AppLog.app.info { "Screen read source=assist text=$hasText screenshot=$hasShot" }
+                if (!hasText && assist.screenshot != null && isProtectedScreenshot(assist.screenshot)) {
+                    return protectedResult(assist.info)
+                }
                 return result(assist.info, assist.screenshot, PhoneTools.NO_SCREENSHOT)
             }
             if (call != null) assistEmptyFor = call
@@ -177,15 +182,61 @@ internal object PhoneScreen {
             "package" to PhoneDetails.string(info?.packageName),
             "activity" to PhoneDetails.string(info?.activity),
             "url" to PhoneDetails.string(info?.url),
-            "text" to PhoneDetails.string(PhoneDetails.cap(info?.text, MAX_LENGTH)),
+            "text" to PhoneDetails.string(PhoneDetails.cap(info?.text?.ifBlank { null }, MAX_LENGTH)),
             "screenshot" to if (jpeg == null && noScreenshot != null) JsonPrimitive(noScreenshot) else null,
-            "note" to if (info == null) JsonPrimitive(PhoneTools.SCREEN_ONLY_PICTURE) else null,
+            "note" to if (info == null || info.text.isBlank()) JsonPrimitive(PhoneTools.SCREEN_ONLY_PICTURE) else null,
         )
         return PhoneTools.Result(
             PhoneDetails.json(fields),
             action = PhoneTools.Action(PhoneTools.Action.Kind.screen, ""),
             jpeg = jpeg,
         )
+    }
+
+    /**
+     * Android returns a black screenshot (with only the status bar drawn) for FLAG_SECURE windows
+     * such as incognito tabs or banking apps. Sample the content region to detect that case.
+     */
+    internal fun isProtectedScreenshot(bitmap: Bitmap): Boolean {
+        val width = bitmap.width
+        val height = bitmap.height
+        if (width < 20 || height < 20) return false
+        val startX = (width * 0.1f).toInt()
+        val endX = (width * 0.9f).toInt()
+        val startY = (height * 0.15f).toInt()
+        val endY = (height * 0.85f).toInt()
+        val cols = 8
+        val rows = 10
+        val stepX = max(1, (endX - startX) / cols)
+        val stepY = max(1, (endY - startY) / rows)
+        var y = startY
+        while (y <= endY) {
+            var x = startX
+            while (x <= endX) {
+                if ((bitmap.getPixel(x, y) and 0x00FFFFFF) != 0) return false
+                x += stepX
+            }
+            y += stepY
+        }
+        return true
+    }
+
+    private fun protectedResult(info: ScreenInfo?): PhoneTools.Result {
+        val app = info?.app
+        val sentence = if (app != null) {
+            "$app hides this screen from screenshots and screen reading (for example, an incognito tab or a protected page), so OpenCode can’t read it."
+        } else {
+            "The app on screen hides its content from screenshots and screen reading (for example, an incognito tab or a banking app), so OpenCode can’t read it."
+        }
+        val fields = mapOf(
+            "app" to PhoneDetails.string(info?.app),
+            "package" to PhoneDetails.string(info?.packageName),
+            "activity" to PhoneDetails.string(info?.activity),
+            "url" to PhoneDetails.string(info?.url),
+        )
+        val compact = PhoneDetails.compact(fields)
+        val message = if (compact.isEmpty()) sentence else PhoneDetails.text(sentence, compact)
+        return PhoneTools.Result.failure(message)
     }
 
     /** Scaled down to [SCREEN_LONG_SIDE], so a read never sends more than the model needs. */
@@ -484,12 +535,15 @@ internal object ScreenShare {
  * app), and hands the answer to [ScreenShare]. Translucent, so nothing of OpenCode shows.
  */
 class ScreenShareActivity : Activity() {
+    private var answered = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ScreenShare.promptOpened(this)
         if (savedInstanceState != null) return
         val manager = getSystemService(MediaProjectionManager::class.java)
         if (manager == null) {
+            answered = true
             ScreenShare.answered(this, RESULT_CANCELED, null)
             finish()
             return
@@ -507,7 +561,10 @@ class ScreenShareActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST) ScreenShare.answered(applicationContext, resultCode, data)
+        if (requestCode == REQUEST) {
+            answered = true
+            ScreenShare.answered(applicationContext, resultCode, data)
+        }
         finish()
     }
 
@@ -519,6 +576,9 @@ class ScreenShareActivity : Activity() {
     }
 
     override fun onDestroy() {
+        if (!answered && !isChangingConfigurations) {
+            ScreenShare.answered(applicationContext, RESULT_CANCELED, null)
+        }
         ScreenShare.promptClosed(this)
         super.onDestroy()
     }

@@ -317,13 +317,20 @@ internal object PhoneEvents {
             if (id.occurrence != null) intent.putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, id.occurrence)
             launch = PhoneLaunch.start(intent)
         }
+        val chooser = PhoneLaunch.isChooser(intent)
         return when (launch) {
             PhoneLaunch.Launch.started -> {
                 PhoneAccess.askForNextTime(context, PhoneAccess.calendar.permissions)
                 val app = PhoneLaunch.handlerName(intent) ?: "the calendar app"
-                PhoneTools.Result(
+                val text = if (chooser) {
+                    "OpenCode doesn’t have calendar access, so the phone is asking the user which calendar app to open the event with. " +
+                        "Nothing has changed yet. The phone is asking the user to allow calendar access."
+                } else {
                     "OpenCode doesn’t have calendar access, so it opened the event in $app for the user to change. " +
-                        "Nothing has changed yet. The phone is asking the user to allow calendar access.",
+                        "Nothing has changed yet. The phone is asking the user to allow calendar access."
+                }
+                PhoneTools.Result(
+                    text,
                     action = PhoneTools.Action.other("Opened the event"),
                 )
             }

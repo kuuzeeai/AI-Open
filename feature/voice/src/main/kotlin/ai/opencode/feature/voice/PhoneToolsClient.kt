@@ -178,12 +178,18 @@ class PhoneToolsClient(
         }
 
         /** Starts a Clock intent: [success] once it started, [noClock] when no app takes it. */
-        private fun clock(intent: Intent, noClock: String, success: () -> PhoneTools.Result): PhoneTools.Result =
-            when (PhoneLaunch.start(intent)) {
-                PhoneLaunch.Launch.started -> success()
+        private fun clock(intent: Intent, noClock: String, success: () -> PhoneTools.Result): PhoneTools.Result {
+            val chooser = PhoneLaunch.isChooser(intent)
+            return when (PhoneLaunch.start(intent)) {
+                PhoneLaunch.Launch.started -> if (chooser) {
+                    PhoneTools.Result("The phone is asking the user which Clock app to use.")
+                } else {
+                    success()
+                }
                 PhoneLaunch.Launch.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
                 PhoneLaunch.Launch.noApp -> PhoneTools.Result.failure(noClock)
             }
+        }
 
         /**
          * Clock answers nothing back and Android lets no app list the alarms, so the result says
@@ -200,7 +206,6 @@ class PhoneToolsClient(
                     intent.putExtra(AlarmClock.EXTRA_ALARM_SEARCH_MODE, AlarmClock.ALARM_SEARCH_MODE_TIME)
                         .putExtra(AlarmClock.EXTRA_HOUR, hour)
                         .putExtra(AlarmClock.EXTRA_MINUTES, minute)
-                        .putExtra(AlarmClock.EXTRA_IS_PM, hour >= 12)
                     text = "Asked Clock to turn off the ${PhoneTools.clockTime(hour, minute)} alarm. If several alarms match, Clock shows them for the user to pick."
                 }
                 "label" -> {

@@ -253,6 +253,11 @@ class OpenCodeAssistantSession(context: Context) :
         AppLog.app.notice("Assistant opened")
         markSideButtonUsed(args, showFlags)
         if (keyguard?.isKeyguardLocked == true) {
+            if (OpenCodeAssistantService.isCallActiveOrRinging(context)) {
+                AppLog.app.notice("Assistant pressed on lock screen during a phone call")
+                hideOnPurpose()
+                return
+            }
             // The panel waits for an unlock; it opens again once the phone is unlocked.
             try {
                 startAssistantActivity(Intent(context, AssistantActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -362,7 +367,8 @@ class OpenCodeAssistantSession(context: Context) :
         readingScreen = false
         readingTimeout?.cancel()
         readingTimeout = null
-        val info = if (screen.isBlank()) null else ScreenInfo(screenApp, screenPackage, screenActivity, screenUrl, screen.toString())
+        val hasMeta = screenApp != null || screenPackage != null || screenUrl != null
+        val info = if (screen.isBlank() && !hasMeta) null else ScreenInfo(screenApp, screenPackage, screenActivity, screenUrl, screen.toString())
         val read = ScreenRead(info, screenshot)
         screenshot = null
         screen.clear()

@@ -62,18 +62,22 @@ enum class PhoneAccess(val title: String, val permissions: List<String>) {
             doNotDisturb -> context.getSystemService(NotificationManager::class.java)?.isNotificationPolicyAccessGranted == true
             systemSettings -> Settings.System.canWrite(context)
             // Coarse location is enough to answer; fine only sharpens it.
-            location -> granted(context, Manifest.permission.ACCESS_COARSE_LOCATION)
+            location -> granted(context, Manifest.permission.ACCESS_COARSE_LOCATION).also { if (it) clearGranted(context, access.permissions) }
             else -> {
                 var all = true
                 for (permission in access.permissions) {
                     if (!granted(context, permission)) all = false
                 }
+                if (all) clearGranted(context, access.permissions)
                 all
             }
         }
 
-        fun granted(context: Context, permission: String): Boolean =
-            context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+        fun granted(context: Context, permission: String): Boolean {
+            val ok = context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+            if (ok) clearGranted(context, listOf(permission))
+            return ok
+        }
 
         /** Whether OpenCode is the phone's digital assistant (the assistant role). */
         fun isAssistant(context: Context): Boolean {
@@ -168,6 +172,21 @@ enum class PhoneAccess(val title: String, val permissions: List<String>) {
 
         internal fun setBlocked(permissions: Set<String>) {
             shared(blockedKey).set(permissions.sorted().joinToString(","))
+        }
+
+        /** Removes any permissions that are now granted (for example via Android Settings). */
+        private fun clearGranted(context: Context, permissions: List<String>) {
+            val blocked = blockedPermissions()
+            if (blocked.isEmpty()) return
+            var changed = false
+            val remaining = blocked.toMutableSet()
+            for (permission in permissions) {
+                if (permission in remaining && context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+                    remaining -= permission
+                    changed = true
+                }
+            }
+            if (changed) setBlocked(remaining)
         }
 
         private fun appDetails(context: Context): Intent =
@@ -331,12 +350,18 @@ internal object PhoneLaunch {
         context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
 
     /**
-     * Whether [intent] puts a screen in front: not the Clock's skip-UI timers and alarms, and not
-     * a phone call, whose screen shows over the lock screen.
+     * Whether [intent] puts a screen in front: not the Clock's skip-UI timers and alarms (unless
+     * several apps trigger Android's chooser), and not a phone call, whose screen shows over the lock screen.
      */
     private fun showsScreen(intent: Intent): Boolean {
-        if (intent.getBooleanExtra(AlarmClock.EXTRA_SKIP_UI, false)) return false
+        if (intent.getBooleanExtra(AlarmClock.EXTRA_SKIP_UI, false)) return isChooser(intent)
         return intent.action != Intent.ACTION_CALL
+    }
+
+    /** Whether Android's chooser will ask the user which app to open [intent] with. */
+    fun isChooser(intent: Intent): Boolean {
+        val info = dependency(AppContext).packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        return info?.activityInfo?.packageName == "android"
     }
 
     /** The name of the app [intent] opens, such as “Gmail”; null when none does. */

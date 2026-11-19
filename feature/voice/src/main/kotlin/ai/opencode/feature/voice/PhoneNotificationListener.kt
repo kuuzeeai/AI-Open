@@ -46,6 +46,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         private const val MAX_MESSAGES = 5
         private const val MAX_ACTIONS = 5
         private const val GONE = "That notification is already gone."
+        private const val RECONNECTING = "Notification access is reconnecting right now. Try again in a moment."
         private const val NOT_CLEARABLE = "That notification can’t be dismissed: it stays while its app is doing something (like playing music or a call)."
 
         /** How long a reply or a tap waits for the app to update or clear its notification. */
@@ -426,8 +427,9 @@ class PhoneNotificationListener : NotificationListenerService() {
         private fun lookUp(key: String): Lookup {
             val context = dependency(AppContext)
             PhoneAccess.requireSpecial(context, PhoneAccess.notifications)?.let { return Lookup.Missing(it) }
-            val listener = connected ?: return Lookup.Missing(PhoneTools.Result.failure(PhoneTools.needsAccess("notification access")))
-            val active = runCatching { listener.activeNotifications }.getOrNull() ?: emptyArray()
+            val listener = connected ?: return Lookup.Missing(PhoneTools.Result.failure(RECONNECTING))
+            val active = runCatching { listener.activeNotifications }.getOrNull()
+                ?: return Lookup.Missing(PhoneTools.Result.failure(RECONNECTING))
             for (posted in active) {
                 if (posted.key == key) return Lookup.Found(context, listener, posted)
             }
@@ -443,8 +445,9 @@ class PhoneNotificationListener : NotificationListenerService() {
         ): PhoneTools.Result {
             val context = dependency(AppContext)
             PhoneAccess.requireSpecial(context, PhoneAccess.notifications)?.let { return it }
-            val listener = connected ?: return PhoneTools.Result.failure(PhoneTools.needsAccess("notification access"))
-            val active = runCatching { listener.activeNotifications }.getOrNull() ?: emptyArray()
+            val listener = connected ?: return PhoneTools.Result.failure(RECONNECTING)
+            val active = runCatching { listener.activeNotifications }.getOrNull()
+                ?: return PhoneTools.Result.failure(RECONNECTING)
             return use(context, listener, active)
         }
 

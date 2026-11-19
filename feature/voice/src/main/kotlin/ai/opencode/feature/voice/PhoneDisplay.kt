@@ -6,7 +6,11 @@ import android.app.NotificationManager
 import android.content.Context
 import android.media.AudioManager
 import android.provider.Settings
+import kotlin.math.exp
+import kotlin.math.ln
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
@@ -75,8 +79,7 @@ internal object PhoneDisplay {
             } else if (call.brightness != null) {
                 // Auto brightness would move it again straight away.
                 Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
-                val level = (call.brightness * 255f / 100).roundToInt().coerceIn(1, 255)
-                Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, level)
+                Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, percentToLevel(call.brightness))
             }
             if (call.autoRotate != null) {
                 Settings.System.putInt(resolver, Settings.System.ACCELEROMETER_ROTATION, if (call.autoRotate) 1 else 0)
@@ -130,7 +133,7 @@ internal object PhoneDisplay {
             "screen_brightness_percent" to percent?.let { JsonPrimitive(it) },
             "auto_brightness" to auto?.let { JsonPrimitive(it) },
             "auto_rotate" to rotate?.let { JsonPrimitive(it) },
-            "screen_timeout_seconds" to timeout?.let { JsonPrimitive(it) },
+            "screen_timeout_seconds" to timeoutValue(context),
         )
         if (missed) {
             val done = if (said.isEmpty()) "" else " " + said.joinToString(" ")
@@ -141,9 +144,38 @@ internal object PhoneDisplay {
 
     // Reading these needs no access, so phone_status gives them too.
 
+    // Android's brightness slider uses the HLG perceptual curve over 1..255.
+    private const val HLG_R = 0.5
+    private const val HLG_A = 0.17883277
+    private const val HLG_B = 0.28466892
+    private const val HLG_C = 0.55991073
+
+    internal fun percentToLevel(percent: Int): Int {
+        val gamma = percent.coerceIn(0, 100) / 100.0
+        val linear12 = if (gamma <= HLG_R) {
+            val scaled = gamma / HLG_R
+            scaled * scaled
+        } else {
+            exp((gamma - HLG_C) / HLG_A) + HLG_B
+        }
+        val norm = (linear12 / 12.0).coerceIn(0.0, 1.0)
+        return (1.0 + norm * 254.0).roundToInt().coerceIn(1, 255)
+    }
+
+    internal fun levelToPercent(level: Int): Int {
+        val norm = ((level - 1) / 254.0).coerceIn(0.0, 1.0)
+        val linear12 = norm * 12.0
+        val gamma = if (linear12 <= 1.0) {
+            HLG_R * sqrt(linear12)
+        } else {
+            HLG_A * ln(linear12 - HLG_B) + HLG_C
+        }
+        return (gamma * 100.0).roundToInt().coerceIn(0, 100)
+    }
+
     fun brightnessPercent(context: Context): Int? {
         val level = runCatching { Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS) }.getOrNull() ?: return null
-        return (level * 100f / 255).roundToInt()
+        return levelToPercent(level)
     }
 
     fun autoBrightness(context: Context): Boolean? {
@@ -158,7 +190,14 @@ internal object PhoneDisplay {
 
     fun timeoutSeconds(context: Context): Int? {
         val millis = runCatching { Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_OFF_TIMEOUT) }.getOrNull() ?: return null
+        if (millis <= 0 || millis == Int.MAX_VALUE) return null
         return millis / 1000
+    }
+
+    fun timeoutValue(context: Context): JsonElement? {
+        val millis = runCatching { Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_OFF_TIMEOUT) }.getOrNull() ?: return null
+        if (millis <= 0 || millis == Int.MAX_VALUE) return JsonPrimitive("never")
+        return JsonPrimitive(millis / 1000)
     }
 
     /** “30 seconds”, “2 minutes”, “1 minute 30 seconds”. */

@@ -53,7 +53,10 @@ internal object PhoneDevice {
         try {
             var torch: String? = null
             for (id in cameras.cameraIdList) {
-                if (cameras.getCameraCharacteristics(id).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true) {
+                val info = cameras.getCameraCharacteristics(id)
+                if (info.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) != true) continue
+                if (torch == null) torch = id
+                if (info.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK) {
                     torch = id
                     break
                 }
@@ -196,17 +199,34 @@ internal object PhoneDevice {
         return PhoneTools.Result(PhoneDetails.text(text, details), action = PhoneTools.Action.other("$name volume $now%"))
     }
 
-    fun doNotDisturb(on: Boolean): PhoneTools.Result {
+    suspend fun doNotDisturb(on: Boolean): PhoneTools.Result {
         val context = dependency(AppContext)
         PhoneAccess.requireSpecial(context, PhoneAccess.doNotDisturb)?.let { return it }
         val notifications = context.getSystemService(NotificationManager::class.java)
+            ?: return PhoneTools.Result.failure("This phone’s Do Not Disturb can’t be changed by apps.")
         // On, the user's own Do Not Disturb rules apply; off lets everything through.
         val filter = if (on) NotificationManager.INTERRUPTION_FILTER_PRIORITY else NotificationManager.INTERRUPTION_FILTER_ALL
         notifications.setInterruptionFilter(filter)
+        var current = notifications.currentInterruptionFilter
+        if (isDoNotDisturbOn(current) != on) {
+            delay(150)
+            current = notifications.currentInterruptionFilter
+        }
+        val details = mapOf("lets_through" to JsonPrimitive(interruptions(current)))
+        if (isDoNotDisturbOn(current) != on) {
+            val reason = if (!on) {
+                "Do Not Disturb is still on: Android only lets OpenCode turn off Do Not Disturb that OpenCode turned on itself. The user can turn it off in Quick Settings."
+            } else {
+                "Do Not Disturb didn’t turn on."
+            }
+            return PhoneTools.Result.failure(PhoneDetails.text(reason, details))
+        }
         val text = if (on) "Do Not Disturb is on." else "Do Not Disturb is off."
-        val details = mapOf("lets_through" to JsonPrimitive(interruptions(notifications.currentInterruptionFilter)))
         return PhoneTools.Result(PhoneDetails.text(text, details), action = PhoneTools.Action.other(text.removeSuffix(".")))
     }
+
+    private fun isDoNotDisturbOn(filter: Int): Boolean =
+        filter != NotificationManager.INTERRUPTION_FILTER_ALL && filter != NotificationManager.INTERRUPTION_FILTER_UNKNOWN
 
     /**
      * Everything the phone tells apps about itself without asking: battery, power, network,
@@ -258,10 +278,7 @@ internal object PhoneDevice {
         val audio = context.getSystemService(AudioManager::class.java)
         val notifications = context.getSystemService(NotificationManager::class.java)
         val zone = ZoneId.systemDefault()
-        val brightness = runCatching { Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS) }.getOrNull()
-        val autoBrightness = runCatching {
-            Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE) == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
-        }.getOrNull()
+        val autoBrightness = PhoneDisplay.autoBrightness(context)
         val storage = runCatching { StatFs(Environment.getDataDirectory().path) }.getOrNull()
         val json = mapOf(
             "battery_percent" to if (level >= 0 && scale > 0) JsonPrimitive((level * 100f / scale).roundToInt()) else null,
@@ -291,10 +308,10 @@ internal object PhoneDevice {
             "ringer" to audio?.let { JsonPrimitive(ringer(it)) },
             "volume" to audio?.let { volumes(it) },
             "next_alarm" to nextAlarm(),
-            "screen_brightness_percent" to brightness?.let { JsonPrimitive((it * 100f / 255).roundToInt()) },
+            "screen_brightness_percent" to PhoneDisplay.brightnessPercent(context)?.let { JsonPrimitive(it) },
             "auto_brightness" to autoBrightness?.let { JsonPrimitive(it) },
             "auto_rotate" to PhoneDisplay.autoRotate(context)?.let { JsonPrimitive(it) },
-            "screen_timeout_seconds" to PhoneDisplay.timeoutSeconds(context)?.let { JsonPrimitive(it) },
+            "screen_timeout_seconds" to PhoneDisplay.timeoutValue(context),
             "storage_free_gb" to storage?.let { JsonPrimitive(gigabytes(it.availableBytes)) },
             "storage_total_gb" to storage?.let { JsonPrimitive(gigabytes(it.totalBytes)) },
             "device" to JsonPrimitive("${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"),

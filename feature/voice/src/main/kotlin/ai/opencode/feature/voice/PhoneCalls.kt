@@ -30,8 +30,7 @@ internal object PhoneCalls {
         if (wasInCall) {
             // A second call waiting: the mode stays “in a call” either way, so the phone can't tell.
             return PhoneTools.Result(
-                "Asked the phone to answer the waiting call, if one was ringing. The other call is now on hold.",
-                action = PhoneTools.Action.other("Answered the call"),
+                "A phone call is already active. Asked the phone to answer a waiting call if one was ringing, though Android doesn’t report whether another call was waiting.",
             )
         }
         var waited = 0L
