@@ -188,7 +188,7 @@ internal object BrandPalette {
             textWeak = hex("#8FA6C4"),
             textTertiary = hex("#6E84A3"),
             border = hex("#1B2C44"),
-            borderStrong = hex("#2C4straight"),
+            borderStrong = hex("#2C4568"),
             accent = hex("#7AA5FF"),
             link = hex("#8FB3FF"),
             syntaxKeyword = hex("#C98BE0"),
