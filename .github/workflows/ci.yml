@@ -1,6 +1,8 @@
 # Checks every pull request and push to dev by building the benchmark APK (assembleBenchmark, R8 minified).
-# Nothing here holds a secret or an OIDC token. A push to dev also publishes the
-# APK as the rolling `dev-latest` pre-release for sideloading.
+# The benchmark build is signed with a stable CI key (OC_KEYSTORE_*) so each APK installs over the
+# last one instead of conflicting with the debug key that AGP generates fresh on every runner.
+# Forks without the secrets fall back to the debug key. A push to dev also publishes the APK as the
+# rolling `dev-latest` pre-release for sideloading.
 name: CI
 
 on:
@@ -50,7 +52,23 @@ jobs:
       - name: Prefer Google's Maven Central mirror
         run: install -Dm644 .github/gradle/maven-mirror.init.gradle.kts "${GRADLE_USER_HOME:-$HOME/.gradle}/init.d/maven-mirror.init.gradle.kts"
 
+      - name: Restore the signing key
+        env:
+          OC_KEYSTORE_BASE64: ${{ secrets.OC_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "${OC_KEYSTORE_BASE64}" ]; then
+            printf '%s' "${OC_KEYSTORE_BASE64}" | base64 -d > "${RUNNER_TEMP}/opencode-ci.keystore"
+            echo "OC_KEYSTORE_PATH=${RUNNER_TEMP}/opencode-ci.keystore" >> "$GITHUB_ENV"
+            echo "Signing with the stable CI key."
+          else
+            echo "No signing secrets: using the debug key (this APK will not update over earlier builds)."
+          fi
+
       - name: Assemble the benchmark APK
+        env:
+          OC_KEYSTORE_PASSWORD: ${{ secrets.OC_KEYSTORE_PASSWORD }}
+          OC_KEY_ALIAS: ${{ secrets.OC_KEY_ALIAS }}
+          OC_KEY_PASSWORD: ${{ secrets.OC_KEY_PASSWORD }}
         run: ./gradlew assembleBenchmark
 
       - name: Name the APK
@@ -58,6 +76,12 @@ jobs:
           cp app/build/outputs/apk/benchmark/app-benchmark.apk "opencode-android-${OC_VERSION_SUFFIX}.apk"
           ls -lh "opencode-android-${OC_VERSION_SUFFIX}.apk"
           echo "APK size: $(du -h "opencode-android-${OC_VERSION_SUFFIX}.apk" | cut -f1) (debug was 143 MB)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${OC_KEYSTORE_PATH:-}" ]; then
+            "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs "opencode-android-${OC_VERSION_SUFFIX}.apk" \
+              | grep -i "SHA-256" | sed 's/^/Signer cert /' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Signed with the debug key (SHA-256 will differ each build)." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
