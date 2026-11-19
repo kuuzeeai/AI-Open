@@ -51,7 +51,7 @@ enum class OpenCodeIconButtonStyle {
 
 /**
  * An icon control with the 48 dp target built in. [size] is the visible face; [tint] fills
- * [OpenCodeIconButtonStyle.Circle].
+ * [OpenCodeIconButtonStyle.Circle] with a tonal container.
  */
 @Composable
 fun OpenCodeIconButton(
@@ -72,17 +72,17 @@ fun OpenCodeIconButton(
             OpenCodeIcon(symbol, contentDescription = contentDescription, size = iconSize)
         }
         OpenCodeIconButtonStyle.Circle -> {
-            val container = tint ?: OpenCodeSurfaces.neutralFill
-            OutlinedIconButton(
+            val scheme = MaterialTheme.colorScheme
+            val container = tint ?: scheme.surfaceContainerHighest
+            IconButton(
                 onClick = onClick,
                 modifier = face,
                 enabled = enabled,
-                shape = OpenCodeShape.card,
-                colors = IconButtonDefaults.outlinedIconButtonColors(
+                shape = OpenCodeShape.circle,
+                colors = IconButtonDefaults.iconButtonColors(
                     containerColor = container,
-                    contentColor = tint?.highContrastForeground() ?: OpenCodeTheme.colors.text,
+                    contentColor = container.highContrastForeground()
                 ),
-                border = if (tint == null) OpenCodeSurfaces.border else null,
                 interactionSource = interactions,
             ) {
                 OpenCodeIcon(symbol, contentDescription = contentDescription, size = iconSize)

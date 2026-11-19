@@ -22,11 +22,11 @@ import androidx.compose.ui.window.DialogProperties
  * a small shadow. No tonal elevation. For what Material's theme can't express.
  */
 object OpenCodeSurfaces {
-    /** Dialogs and popovers (desktop dialog ~10–12 px). */
+    /** Dialogs and popovers (28 dp). */
     val dialogShape: Shape = RoundedCornerShape(OpenCodeRadius.panel)
 
-    /** Popovers, menus and floating panels. */
-    val popoverShape: Shape = RoundedCornerShape(OpenCodeRadius.card)
+    /** Popovers, menus and floating panels (20 dp). */
+    val popoverShape: Shape = RoundedCornerShape(OpenCodeRadius.tile)
 
     /** The hairline every floating surface wears. */
     val hairline: Dp = 1.dp

@@ -36,11 +36,11 @@ object TranscriptMetrics {
     val turn: Dp = 20.dp
 
     /** `transcript.bubble.cornerRadius` default. */
-    val bubbleCornerRadius: Dp = 10.dp
+    val bubbleCornerRadius: Dp = 24.dp
     /** Content surfaces: code, tables, cards, and images (`transcript.card.cornerRadius` default). */
-    val cardCornerRadius: Dp = 8.dp
+    val cardCornerRadius: Dp = 20.dp
     /** Controls inside sheets and cards: choices and fields. */
-    val controlCornerRadius: Dp = 6.dp
+    val controlCornerRadius: Dp = 12.dp
 
     /** `transcript.bubble.maxFraction` default. */
     const val maximumUserBubbleFraction: Float = 0.82f

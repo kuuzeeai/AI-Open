@@ -9,34 +9,35 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Corner radii from the OpenCode desktop (`--radius-sm` 4 … `-xl` 10). Sheets keep a 16 dp top
- * radius.
+ * Corner radii for the Material 3 Expressive refresh. The desktop's flat 4–16 dp scale is replaced
+ * by the expressive one: controls and cards are capsules or deeply rounded panels, floating
+ * surfaces (composer, sheets) wear 28–32 dp.
  */
 object OpenCodeRadius {
-    /** Tiny marks: inline code, checkbox insets (desktop 4). */
-    val xs: Dp = 4.dp
-    /** Small fills and thumbnails (desktop 6). */
-    val sm: Dp = 6.dp
-    /** Tertiary-fill fields and rows (`tertiarySystemFill` boxes, desktop 8). */
-    val fill: Dp = 8.dp
-    /** Inline controls and trays (desktop 8). */
-    val control: Dp = 8.dp
-    /** Cards and glass cards (server list, error report, desktop 10). */
-    val card: Dp = 10.dp
-    /** Attachment chips, clipped media, settings tiles (desktop 10). */
-    val tile: Dp = 10.dp
-    /** Large panels: connect, server details, What's New cards (desktop dock 12). */
-    val panel: Dp = 12.dp
-    /** Sheets, scanner frame, model list, voice panel (16). */
-    val sheet: Dp = 16.dp
+    /** Tiny marks: inline code, checkbox insets. */
+    val xs: Dp = 8.dp
+    /** Small fills and thumbnails. */
+    val sm: Dp = 12.dp
+    /** Tertiary-fill fields and rows. */
+    val fill: Dp = 16.dp
+    /** Inline controls and trays. */
+    val control: Dp = 16.dp
+    /** Cards and glass cards. */
+    val card: Dp = 24.dp
+    /** Attachment chips, clipped media, settings tiles. */
+    val tile: Dp = 20.dp
+    /** Large panels: connect, server details, What's New cards. */
+    val panel: Dp = 28.dp
+    /** Sheets, scanner frame, model list, voice panel. */
+    val sheet: Dp = 32.dp
 }
 
 /** [capsule] and [circle] stay true. */
 object OpenCodeShape {
     val capsule = RoundedCornerShape(percent = 50)
 
-    /** Buttons, pills and fields (desktop `--radius-md`/`-lg` at phone size). */
-    val control = RoundedCornerShape(OpenCodeRadius.fill)
+    /** Buttons, pills and fields. */
+    val control = RoundedCornerShape(OpenCodeRadius.control)
     val circle = CircleShape
     val card = RoundedCornerShape(OpenCodeRadius.card)
     val panel = RoundedCornerShape(OpenCodeRadius.panel)
@@ -48,14 +49,13 @@ object OpenCodeShape {
 }
 
 /**
- * Material shape scale from the desktop radii: extraSmall 6, small 6, medium 8, large 10,
- * extraLarge 16.
+ * Material 3 Expressive shape scale: extraSmall 8, small 12, medium 20, large 28,
+ * extraLarge 36.
  */
 val OpenCodeShapes = Shapes(
-    // Text fields and menus: the desktop's 6 px input and context-menu radius.
-    extraSmall = RoundedCornerShape(OpenCodeRadius.sm),
+    extraSmall = RoundedCornerShape(OpenCodeRadius.xs),
     small = RoundedCornerShape(OpenCodeRadius.sm),
-    medium = RoundedCornerShape(OpenCodeRadius.fill),
+    medium = RoundedCornerShape(OpenCodeRadius.panel),
     large = RoundedCornerShape(OpenCodeRadius.card),
     extraLarge = RoundedCornerShape(OpenCodeRadius.sheet),
 )

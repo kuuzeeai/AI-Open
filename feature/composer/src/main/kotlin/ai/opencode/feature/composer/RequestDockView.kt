@@ -136,7 +136,7 @@ object RequestDockMetrics {
     /** One edge for the caption, the question, the marks, and the bands. */
     val edge: Dp = 20.dp
     /** The composer's surface, which the panel shares. */
-    val cornerRadius: Dp = 12.dp
+    val cornerRadius: Dp = 24.dp
     /** × is a circle centred on the glass's top-trailing corner arc, so its edge runs concentric with the glass's corner. */
     val closeSize: Dp = 34.dp
     /** The header row's inset from the top. */

@@ -29,6 +29,8 @@ enum class AppTheme(val rawValue: String, private val brandTitle: String?) {
     @SerialName("dracula") Dracula("dracula", "Dracula"),
     @SerialName("rosepine") RosePine("rosepine", "Rosé Pine"),
     @SerialName("github") GitHub("github", "GitHub"),
+    @SerialName("amoled") Amoled("amoled", "AMOLED"),
+    @SerialName("pastelblue") PastelBlue("pastelblue", "Pastel Blue"),
     ;
 
     val id: String get() = rawValue
@@ -241,6 +243,8 @@ data class ThemeDefinition(
     val title: String,
     val light: ThemeVariant,
     val dark: ThemeVariant,
+    /** Optional third variant: a pastel tint used by [AppTheme.PastelBlue]. */
+    val pastel: ThemeVariant? = null,
 ) {
     fun variant(isDark: Boolean): ThemeVariant = if (isDark) dark else light
 }
@@ -332,6 +336,8 @@ object ThemePalette {
         AppTheme.Dracula -> dracula
         AppTheme.RosePine -> rosepine
         AppTheme.GitHub -> github
+        AppTheme.Amoled -> BrandPalette.amoled
+        AppTheme.PastelBlue -> BrandPalette.pastelBlue
     }
 
     /** Windows crossfade for this long when the theme or appearance changes. */

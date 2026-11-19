@@ -40,7 +40,7 @@ import java.text.NumberFormat
  * `AgentFileCards` live in `:feature:media`, which the transcript and its image gallery use too.
  */
 object FileAttachmentMetrics {
-    val cardCornerRadius: Dp = 14.dp
+    val cardCornerRadius: Dp = 20.dp
     val clustered: Dp = 8.dp
     val standard: Dp = 12.dp
 }
@@ -50,7 +50,7 @@ object ComposerFileChip {
     /** The least height: larger text grows the chip rather than clipping it. */
     val height: Dp = 76.dp
     val width: Dp = 220.dp
-    val cornerRadius: Dp = 22.dp
+    val cornerRadius: Dp = 28.dp
 
     fun subtitle(file: ComposerFileAttachment): String = AttachmentFileType.subtitle(file.name, file.mime, file.size)
 

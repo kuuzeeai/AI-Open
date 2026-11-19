@@ -34,6 +34,10 @@ class OpenCodeColors(
     val codeBand: Color,
     /** The user's message bubble. */
     val userBubble: Color,
+    /** The user's message bubble: tonal (primaryContainer) in the System theme. */
+    val bubble: Color,
+    /** Text and marks on [bubble]. */
+    val onBubble: Color,
     /** Inline `code` fill. */
     val inlineCodeFill: Color,
     /** Primary text. */
@@ -114,6 +118,18 @@ class OpenCodeColors(
                     else -> v.canvas.mixedInOklab(v.text, tone).color
                 }
             }
+            // For System theme we don't have the dynamic scheme here; use tonal equivalents from the fixed palette.
+            // The DynamicSystemTheme.colors() will override these with the real dynamic values.
+            val bubble = when {
+                system -> v.canvas.mixedInOklab(v.accent, 0.22).color
+                highContrast -> v.surfaceStrong.color
+                else -> v.accent.color
+            }
+            val onBubble = when {
+                system -> v.accent.highContrastForeground.color
+                highContrast -> v.textStrong.color
+                else -> v.accent.highContrastForeground.color
+            }
             return OpenCodeColors(
                 theme = theme,
                 isDark = isDark,
@@ -170,6 +186,8 @@ class OpenCodeColors(
                 danger = (if (system) SystemColors.red(isDark) else v.diffRemovedText).color,
                 warning = SystemColors.orange(isDark).color,
                 bodyTextResolver = bodyResolver,
+                bubble = bubble,
+                onBubble = onBubble,
             )
         }
     }
@@ -209,7 +227,6 @@ fun OpenCodeColors.toColorScheme(): ColorScheme {
     val accent = v.accent
     val strong = if (system) v.text else v.textStrong
     val textRgba = if (!system && highContrast) v.textStrong else v.text
-    val secondary = (if (!system && highContrast) v.text else v.textWeak).composited(canvas)
     val outline = v.borderStrong.composited(canvas)
     val outlineVariant = (if ((!system && highContrast) || strongBorders) v.borderStrong else v.border).composited(canvas)
     val error = if (system) SystemColors.red(isDark) else v.diffRemovedText
@@ -220,6 +237,15 @@ fun OpenCodeColors.toColorScheme(): ColorScheme {
     val errorContainer = (if (system) SystemColors.red(isDark).withAlpha(0.14) else v.glassDiffRemovedFill).composited(canvas)
     val surfaceBright = if (isDark) v.surfaceStrong else canvas
     val surfaceDim = if (isDark) canvas else v.canvasWeak
+    // Curated themes get a tonal secondary and tertiary from their syntax hues, so each one is
+    // colourful instead of grey. Light containers sit near-white (L 0.92, C 0.05) and dark ones near
+    // black (L 0.30, C 0.06); both clear AA on the canvas and on white labels.
+    val hueSecondary = v.syntaxType.oklch.third
+    val hueTertiary = v.syntaxString.oklch.third
+    val secondary = tonalContainer(hueSecondary, isDark)
+    val secondaryContainer = tonalContainerStrong(hueSecondary, isDark)
+    val tertiary = tonalContainer(hueTertiary, isDark)
+    val tertiaryContainer = tonalContainerStrong(hueTertiary, isDark)
     // System tints are designed for white labels, so the luminance pick applies only to theme
     // palettes.
     val white = ThemeRGBA(1.0, 1.0, 1.0)
@@ -231,12 +257,12 @@ fun OpenCodeColors.toColorScheme(): ColorScheme {
         onPrimaryContainer = strong.color,
         inversePrimary = accent.mixedInOklab(canvas.highContrastForeground, 0.35).color,
         secondary = secondary.color,
-        onSecondary = canvas.color,
-        secondaryContainer = v.surfaceStrong.color,
-        onSecondaryContainer = textRgba.color,
-        tertiary = v.link.color,
-        onTertiary = (if (system) white else v.link.highContrastForeground).color,
-        tertiaryContainer = canvas.mixedInOklab(v.link, 0.22).color,
+        onSecondary = strong.color,
+        secondaryContainer = secondaryContainer.color,
+        onSecondaryContainer = strong.color,
+        tertiary = tertiary.color,
+        onTertiary = (if (system) white else tertiary.highContrastForeground).color,
+        tertiaryContainer = tertiaryContainer.color,
         onTertiaryContainer = strong.color,
         background = canvas.color,
         onBackground = textRgba.color,
@@ -267,6 +293,18 @@ fun OpenCodeColors.toColorScheme(): ColorScheme {
 
 /** The current [OpenCodeColors]; provided by [OpenCodeTheme]. Read via `OpenCodeTheme.colors`. */
 val LocalOpenCodeColors = staticCompositionLocalOf { OpenCodeColors.resolve(AppTheme.System, isDark = false) }
+
+/**
+ * A curated theme's tonal secondary/tertiary role, mixed from a syntax hue at a container
+ * lightness: light near-white (L 0.92, C 0.05), dark near-black (L 0.30, C 0.06). Both clear AA on
+ * the canvas and on white labels.
+ */
+private fun tonalContainer(hue: Double, isDark: Boolean): ThemeRGBA =
+    ThemeRGBA.fromOklch(if (isDark) 0.30 else 0.92, 0.06, hue)
+
+/** The stronger container: same hue, a touch deeper in light and a touch richer in dark. */
+private fun tonalContainerStrong(hue: Double, isDark: Boolean): ThemeRGBA =
+    ThemeRGBA.fromOklch(if (isDark) 0.22 else 0.95, 0.05, hue)
 
 /** Crisp dark or white foreground over this colour. */
 fun Color.highContrastForeground(): Color =
