@@ -42,7 +42,7 @@ object DynamicSystemTheme {
             canvas = scheme.surface.rgba(),
             canvasWeak = scheme.surfaceContainer.rgba(),
             codeBand = scheme.surfaceContainerLow.rgba(),
-            userBubble = scheme.surfaceContainerHigh.rgba(),
+            userBubble = scheme.primaryContainer.rgba(), // M3 Expressive: tonal container for user bubble
             surfaceStrong = scheme.surfaceContainerHighest.rgba(),
             text = scheme.onSurface.rgba(),
             bodyText = scheme.onSurface.rgba(),
