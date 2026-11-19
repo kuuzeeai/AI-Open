@@ -122,6 +122,8 @@ object DynamicSystemTheme {
             danger = scheme.error,
             warning = SystemColors.orange(isDark).color,
             bodyTextResolver = bodyResolver,
+            bubble = scheme.primaryContainer,
+            onBubble = scheme.onPrimaryContainer,
         )
     }
 

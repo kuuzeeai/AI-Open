@@ -142,8 +142,8 @@ object ComposerMetrics {
     /** `composer.size.barHeight`. */
     const val barHeight = 56f
 
-    /** `composer.size.cornerRadius`; on this branch the desktop dock's 12. */
-    const val cornerRadius = 12f
+    /** `composer.size.cornerRadius`; expressive refresh 28. */
+    const val cornerRadius = 28f
 
     /** `composer.spacing.innerHorizontal`. */
     const val innerHorizontal = 6f

@@ -242,7 +242,7 @@ fun Modifier.openCodeFieldContainer(
 
 /** [OpenCodeTextField]'s geometry, type and colours. */
 object OpenCodeTextFieldDefaults {
-    val shape: Shape = OpenCodeShape.control
+    val shape: Shape = OpenCodeShape.fill
     val minHeight: Dp = 48.dp
     val horizontalPadding: Dp = 12.dp
     val iconSize: Dp = 18.dp
@@ -258,23 +258,19 @@ object OpenCodeTextFieldDefaults {
     fun colors(): OpenCodeTextFieldColors {
         val colors = OpenCodeTheme.colors
         val scheme = MaterialTheme.colorScheme
-        // Light: the page's own white with the desktop's soft lift. Dark: a step up from the sheet.
-        val container = if (colors.isDark) {
-            lerp(scheme.surfaceContainerLow, scheme.surfaceContainerHigh, 0.5f)
-        } else {
-            scheme.surfaceContainerLowest
-        }
-        val border = if (colors.strongBorders) colors.tertiaryText else scheme.outline
-        val shadow = if (colors.isDark) Color.Transparent else Color.Black.copy(alpha = 0.25f)
+        // Tonal container for expressive fields; light near-white, dark raised.
+        val container = scheme.surfaceContainerHigh
+        val border = if (colors.strongBorders) scheme.outline else scheme.outlineVariant
+        val shadow = Color.Transparent
         return OpenCodeTextFieldColors(
             container = container,
             border = border,
-            focusedBorder = colors.focusRing,
+            focusedBorder = scheme.primary,
             error = scheme.error,
-            text = colors.text,
-            label = colors.secondaryText,
-            placeholder = colors.tertiaryText,
-            icon = colors.tertiaryText,
+            text = scheme.onSurface,
+            label = scheme.onSurfaceVariant,
+            placeholder = scheme.onSurfaceVariant.copy(alpha = 0.6f),
+            icon = scheme.onSurfaceVariant.copy(alpha = 0.6f),
             cursor = scheme.primary,
             shadow = shadow,
         )

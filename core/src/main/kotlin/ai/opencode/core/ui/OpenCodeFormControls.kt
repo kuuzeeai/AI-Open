@@ -144,8 +144,8 @@ private fun switchColors(): SwitchColors {
     val lightThumb = if (colors.isDark) colors.secondaryText else scheme.surfaceContainerLowest
     val edge = if (colors.isDark) Color.Transparent else Color.Black.copy(alpha = 0.10f)
     return SwitchColors(
-        checkedTrack = colors.selection,
-        checkedThumb = colors.onSelection,
+        checkedTrack = scheme.primary,
+        checkedThumb = scheme.onPrimary,
         uncheckedTrack = scheme.surfaceContainerHighest,
         uncheckedBorder = outline,
         uncheckedThumb = lightThumb,

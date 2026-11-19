@@ -73,16 +73,16 @@ object OpenCodeTextStyles {
     // closer than a monitor: body text one step up (15 sp), titles medium-weight and tightly
     // tracked like the desktop's `text-16/20-medium`. Everything stays in sp, so font scaling works.
 
-    /** `.largeTitle`: 28/34 medium. */
-    val largeTitle = style(28, 34, FontWeight.Medium, -0.4)
-    /** `.title` (title1): 24/30 medium. */
-    val title1 = style(24, 30, FontWeight.Medium, -0.32)
-    /** `.title2`: 20/26 medium (desktop `text-20-medium`). */
-    val title2 = style(20, 26, FontWeight.Medium, -0.32)
-    /** `.title3`: 18/24 medium. */
-    val title3 = style(18, 24, FontWeight.Medium, -0.16)
-    /** `.headline`: 16/22 medium (desktop `text-16-medium`). */
-    val headline = style(16, 22, FontWeight.Medium, -0.16)
+    /** `.largeTitle`: 32/40 semi-bold, the expressive screen title. */
+    val largeTitle = style(32, 40, FontWeight.SemiBold, -0.4)
+    /** `.title` (title1): 28/36 semi-bold. */
+    val title1 = style(28, 36, FontWeight.SemiBold, -0.32)
+    /** `.title2`: 22/28 semi-bold (desktop `text-20-medium`). */
+    val title2 = style(22, 28, FontWeight.SemiBold, -0.32)
+    /** `.title3`: 20/26 semi-bold. */
+    val title3 = style(20, 26, FontWeight.SemiBold, -0.16)
+    /** `.headline`: 18/24 semi-bold (desktop `text-16-medium`). */
+    val headline = style(18, 24, FontWeight.SemiBold, -0.16)
     /** `.body`: 15/23 (desktop markdown 14 px / 160 %). */
     val body = style(15, 23)
     /** `.callout`: 15/21. */

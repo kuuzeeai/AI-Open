@@ -51,7 +51,7 @@ fun OpenCodePrimaryButton(
         onClick = onClick,
         modifier = modifier.heightIn(min = OpenCodeButtonDefaults.height).motionPress(interactions),
         enabled = enabled,
-        shape = OpenCodeShape.control,
+        shape = OpenCodeShape.capsule,
         colors = colors,
         contentPadding = OpenCodeButtonDefaults.contentPadding,
         interactionSource = interactions,
@@ -70,7 +70,7 @@ fun OpenCodePrimaryButton(
 ) = OpenCodePrimaryButton(onClick, modifier, enabled, role) { ButtonLabel(text) }
 
 /**
- * The neutral companion: Back, Skip, Cancel, Not Now. Destructive keeps the neutral fill with red
+ * The neutral companion: Back, Skip, Cancel, Not Now. Destructive keeps the tonal fill with red
  * text.
  */
 @Composable
@@ -81,20 +81,25 @@ fun OpenCodeSecondaryButton(
     role: OpenCodeButtonRole = OpenCodeButtonRole.Normal,
     content: @Composable RowScope.() -> Unit,
 ) {
-    // Desktop neutral button: a light neutral fill with a hairline.
-    val container = OpenCodeSurfaces.neutralFill
+    val scheme = MaterialTheme.colorScheme
     val colors = if (role == OpenCodeButtonRole.Destructive) {
-        ButtonDefaults.filledTonalButtonColors(containerColor = container, contentColor = OpenCodeTheme.colors.destructive)
+        ButtonDefaults.filledTonalButtonColors(
+            containerColor = scheme.secondaryContainer,
+            contentColor = OpenCodeTheme.colors.destructive
+        )
     } else {
-        ButtonDefaults.filledTonalButtonColors(containerColor = container, contentColor = OpenCodeTheme.colors.text)
+        ButtonDefaults.filledTonalButtonColors(
+            containerColor = scheme.secondaryContainer,
+            contentColor = scheme.onSecondaryContainer
+        )
     }
     val interactions = remember { MutableInteractionSource() }
     FilledTonalButton(
         onClick = onClick,
         modifier = modifier.heightIn(min = OpenCodeButtonDefaults.height).motionPress(interactions),
         enabled = enabled,
-        shape = OpenCodeShape.control,
-        border = OpenCodeSurfaces.border,
+        shape = OpenCodeShape.capsule,
+        border = null,
         colors = colors,
         contentPadding = OpenCodeButtonDefaults.contentPadding,
         interactionSource = interactions,
