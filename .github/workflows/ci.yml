@@ -1,6 +1,6 @@
-# Checks every pull request and push to dev by building the debug APK (assembleDebug).
+# Checks every pull request and push to dev by building the benchmark APK (assembleBenchmark, R8 minified).
 # Nothing here holds a secret or an OIDC token. A push to dev also publishes the
-# debug APK as the rolling `dev-latest` pre-release for sideloading.
+# APK as the rolling `dev-latest` pre-release for sideloading.
 name: CI
 
 on:
@@ -50,11 +50,14 @@ jobs:
       - name: Prefer Google's Maven Central mirror
         run: install -Dm644 .github/gradle/maven-mirror.init.gradle.kts "${GRADLE_USER_HOME:-$HOME/.gradle}/init.d/maven-mirror.init.gradle.kts"
 
-      - name: Assemble the debug APK
-        run: ./gradlew assembleDebug
+      - name: Assemble the benchmark APK
+        run: ./gradlew assembleBenchmark
 
       - name: Name the APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk "opencode-android-${OC_VERSION_SUFFIX}.apk"
+        run: |
+          cp app/build/outputs/apk/benchmark/app-benchmark.apk "opencode-android-${OC_VERSION_SUFFIX}.apk"
+          ls -lh "opencode-android-${OC_VERSION_SUFFIX}.apk"
+          echo "APK size: $(du -h "opencode-android-${OC_VERSION_SUFFIX}.apk" | cut -f1) (debug was 143 MB)" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -94,7 +97,7 @@ jobs:
         run: |
           cp "opencode-android-${SHORT}.apk" opencode-android.apk
           title="dev-latest · ${SHORT}"
-          notes="Debug build of dev at ${GITHUB_SHA} (version 0.1.0-${SHORT}, code ${GITHUB_RUN_NUMBER}). Install steps: see the README's \"Try it on Android\"."
+          notes="Benchmark (R8) build of dev at ${GITHUB_SHA} (version 0.1.0-${SHORT}, code ${GITHUB_RUN_NUMBER}). Install steps: see the README's \"Try it on Android\"."
           if gh release view dev-latest > /dev/null 2>&1; then
             gh api -X PATCH "repos/${GH_REPO}/git/refs/tags/dev-latest" -f sha="${GITHUB_SHA}" -F force=true > /dev/null
             gh release edit dev-latest --title "$title" --notes "$notes" --prerelease
