@@ -342,7 +342,7 @@ internal data class ConfirmCopy(val symbol: SFSymbol, val title: String, val bod
             )
             is PhoneTools.Confirm.Texts -> ConfirmCopy(
                 SFSymbol.TextBubble,
-                if (card.from == null) "Read Your Texts?" else "Read Texts From ${card.from}?",
+                if (card.from == null) "Read Your Texts?" else "Read Texts With ${card.from}?",
                 if (card.from == null) {
                     "OpenCode wants to read the texts on your phone for the session."
                 } else {
@@ -354,7 +354,11 @@ internal data class ConfirmCopy(val symbol: SFSymbol, val title: String, val bod
             is PhoneTools.Confirm.CallLog -> ConfirmCopy(
                 SFSymbol.Phone,
                 if (card.from == null) "Read Your Recent Calls?" else "Read Calls With ${card.from}?",
-                "OpenCode wants to read the call log on your phone for the session.",
+                if (card.from == null) {
+                    "OpenCode wants to read the call log on your phone for the session."
+                } else {
+                    "OpenCode wants to read your calls with ${card.from} for the session."
+                },
                 "Not Now",
                 "Allow",
             )

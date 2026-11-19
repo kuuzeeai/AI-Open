@@ -179,15 +179,15 @@ class PhoneToolsClient(
 
         /** Starts a Clock intent: [success] once it started, [noClock] when no app takes it. */
         private fun clock(intent: Intent, noClock: String, success: () -> PhoneTools.Result): PhoneTools.Result {
-            val chooser = PhoneLaunch.isChooser(intent)
-            return when (PhoneLaunch.start(intent)) {
-                PhoneLaunch.Launch.started -> if (chooser) {
+            val launch = PhoneLaunch.start(intent)
+            return when (launch.status) {
+                PhoneLaunch.Status.started -> if (launch.chooser) {
                     PhoneTools.Result("The phone is asking the user which Clock app to use.")
                 } else {
                     success()
                 }
-                PhoneLaunch.Launch.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
-                PhoneLaunch.Launch.noApp -> PhoneTools.Result.failure(noClock)
+                PhoneLaunch.Status.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
+                PhoneLaunch.Status.noApp -> PhoneTools.Result.failure(noClock)
             }
         }
 
@@ -203,9 +203,11 @@ class PhoneToolsClient(
                 "time" -> {
                     val hour = call.hour ?: 0
                     val minute = call.minute ?: 0
+                    val twelveHour = if (hour % 12 == 0) 12 else hour % 12
                     intent.putExtra(AlarmClock.EXTRA_ALARM_SEARCH_MODE, AlarmClock.ALARM_SEARCH_MODE_TIME)
-                        .putExtra(AlarmClock.EXTRA_HOUR, hour)
+                        .putExtra(AlarmClock.EXTRA_HOUR, twelveHour)
                         .putExtra(AlarmClock.EXTRA_MINUTES, minute)
+                        .putExtra(AlarmClock.EXTRA_IS_PM, hour >= 12)
                     text = "Asked Clock to turn off the ${PhoneTools.clockTime(hour, minute)} alarm. If several alarms match, Clock shows them for the user to pick."
                 }
                 "label" -> {
@@ -232,7 +234,7 @@ class PhoneToolsClient(
                 "next_alarm_before" to (before ?: JsonPrimitive("none")),
                 "next_alarm_now" to (after ?: JsonPrimitive("none")),
             )
-            return asked.copy(text = PhoneDetails.text(text, details))
+            return asked.copy(text = PhoneDetails.text(asked.text, details))
         }
 
         private fun openApp(query: String): PhoneTools.Result {
@@ -249,12 +251,12 @@ class PhoneToolsClient(
                 is AppMatcher.Result.Found -> {
                     val intent = packages.getLaunchIntentForPackage(match.app.packageName)
                     val launch = if (intent == null) {
-                        PhoneLaunch.Launch.noApp
+                        PhoneLaunch.Status.noApp
                     } else {
-                        PhoneLaunch.start(intent.addFlags(Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED))
+                        PhoneLaunch.start(intent.addFlags(Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)).status
                     }
                     when (launch) {
-                        PhoneLaunch.Launch.started -> PhoneTools.Result(
+                        PhoneLaunch.Status.started -> PhoneTools.Result(
                             PhoneDetails.text(
                                 "Opened ${match.app.label}.",
                                 mapOf(
@@ -270,8 +272,8 @@ class PhoneToolsClient(
                             ),
                             action = PhoneTools.Action(PhoneTools.Action.Kind.app, match.app.label, packageName = match.app.packageName),
                         )
-                        PhoneLaunch.Launch.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
-                        PhoneLaunch.Launch.noApp -> PhoneTools.Result.failure("${match.app.label} couldn’t be opened.")
+                        PhoneLaunch.Status.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
+                        PhoneLaunch.Status.noApp -> PhoneTools.Result.failure("${match.app.label} couldn’t be opened.")
                     }
                 }
 

@@ -253,7 +253,7 @@ class OpenCodeAssistantSession(context: Context) :
         AppLog.app.notice("Assistant opened")
         markSideButtonUsed(args, showFlags)
         if (keyguard?.isKeyguardLocked == true) {
-            if (OpenCodeAssistantService.isCallActiveOrRinging(context)) {
+            if (OpenCodeAssistantService.isPhoneCall(context)) {
                 AppLog.app.notice("Assistant pressed on lock screen during a phone call")
                 hideOnPurpose()
                 return

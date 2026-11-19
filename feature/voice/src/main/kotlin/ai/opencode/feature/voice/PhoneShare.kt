@@ -118,8 +118,8 @@ object PhoneShare {
         if (packageName == context.packageName) {
             return PhoneTools.Result.failure("That link opens in OpenCode itself, so it wasn’t opened.")
         }
-        return when (PhoneLaunch.start(intent)) {
-            PhoneLaunch.Launch.started -> {
+        return when (PhoneLaunch.start(intent).status) {
+            PhoneLaunch.Status.started -> {
                 if (app == null) {
                     PhoneTools.Result(
                         "Opened the link. Android asked the user which app to open it with.",
@@ -135,28 +135,28 @@ object PhoneShare {
                     )
                 }
             }
-            PhoneLaunch.Launch.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
-            PhoneLaunch.Launch.noApp -> PhoneTools.Result.failure("No app on this phone opens that link, so nothing was opened.")
+            PhoneLaunch.Status.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
+            PhoneLaunch.Status.noApp -> PhoneTools.Result.failure("No app on this phone opens that link, so nothing was opened.")
         }
     }
 
     private fun shareSheet(send: Intent): PhoneTools.Result {
         val chooser = Intent.createChooser(send, null)
-        return when (PhoneLaunch.start(chooser)) {
-            PhoneLaunch.Launch.started -> PhoneTools.Result(
+        return when (PhoneLaunch.start(chooser).status) {
+            PhoneLaunch.Status.started -> PhoneTools.Result(
                 "Opened the share sheet with the text filled in. The user picks the app and sends it there.",
                 action = PhoneTools.Action.other("Opened the share sheet"),
             )
-            PhoneLaunch.Launch.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
-            PhoneLaunch.Launch.noApp -> PhoneTools.Result.failure("No app on this phone can take a share.")
+            PhoneLaunch.Status.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
+            PhoneLaunch.Status.noApp -> PhoneTools.Result.failure("No app on this phone can take a share.")
         }
     }
 
     private fun shareTo(send: Intent, target: Target, query: String, matched: AppMatcher.App, apps: List<AppMatcher.App>): PhoneTools.Result {
         send.setClassName(target.packageName, target.className)
         val exact = AppMatcher.isExact(query, matched)
-        return when (PhoneLaunch.start(send)) {
-            PhoneLaunch.Launch.started -> PhoneTools.Result(
+        return when (PhoneLaunch.start(send).status) {
+            PhoneLaunch.Status.started -> PhoneTools.Result(
                 PhoneDetails.text(
                     "Opened ${target.appLabel} with the text filled in. The user finishes sending it there.",
                     mapOf(
@@ -173,8 +173,8 @@ object PhoneShare {
                 ),
                 action = PhoneTools.Action(PhoneTools.Action.Kind.app, target.appLabel, packageName = target.packageName),
             )
-            PhoneLaunch.Launch.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
-            PhoneLaunch.Launch.noApp -> PhoneTools.Result.failure("${target.appLabel} couldn’t be opened.")
+            PhoneLaunch.Status.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
+            PhoneLaunch.Status.noApp -> PhoneTools.Result.failure("${target.appLabel} couldn’t be opened.")
         }
     }
 

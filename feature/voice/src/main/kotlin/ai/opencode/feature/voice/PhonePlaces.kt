@@ -22,7 +22,8 @@ import java.util.Locale
 import kotlin.coroutines.resume
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.seconds
-import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -37,7 +38,6 @@ internal object PhonePlaces {
     private const val MAX_EVENTS = 50
     private const val MAX_ATTENDEES = 15
     private const val MAX_DESCRIPTION = 600
-    private const val DEFAULT_REMINDER_MINUTES = 10
     private const val DAY_MILLIS = 86_400_000L
     private const val FRESH_MILLIS = 2 * 60 * 1000L
     private val fixWait = 10.seconds
@@ -73,14 +73,6 @@ internal object PhonePlaces {
                 if (call.notes != null) values.put(CalendarContract.Events.DESCRIPTION, call.notes)
                 val added = runCatching { context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values) }.getOrNull()
                 if (added != null) {
-                    val eventID = runCatching { ContentUris.parseId(added) }.getOrNull()
-                    if (eventID != null && !call.allDay) {
-                        val reminder = ContentValues()
-                        reminder.put(CalendarContract.Reminders.EVENT_ID, eventID)
-                        reminder.put(CalendarContract.Reminders.MINUTES, DEFAULT_REMINDER_MINUTES)
-                        reminder.put(CalendarContract.Reminders.METHOD, CalendarContract.Reminders.METHOD_ALERT)
-                        runCatching { context.contentResolver.insert(CalendarContract.Reminders.CONTENT_URI, reminder) }
-                    }
                     val at = if (call.location == null) "" else " at ${call.location}"
                     val details = mapOf(
                         "start" to JsonPrimitive(PhoneDetails.minute.format(call.start)),
@@ -104,18 +96,24 @@ internal object PhonePlaces {
             .putExtra(CalendarContract.Events.TITLE, call.title)
         if (call.location != null) intent.putExtra(CalendarContract.Events.EVENT_LOCATION, call.location)
         if (call.notes != null) intent.putExtra(CalendarContract.Events.DESCRIPTION, call.notes)
-        val app = PhoneLaunch.handlerName(intent)
-        return when (PhoneLaunch.start(intent)) {
-            PhoneLaunch.Launch.started -> PhoneTools.Result(
-                if (app == null) {
+        val launch = PhoneLaunch.start(intent)
+        val app = launch.app ?: "the calendar app"
+        return when (launch.status) {
+            PhoneLaunch.Status.started -> {
+                val opened = if (launch.chooser) {
                     "The phone is asking the user which app to add “${call.title}” ($shown) with. They pick a calendar app, then tap save."
                 } else {
                     "Opened $app with “${call.title}” filled in for $shown. The user has to tap save."
-                },
-                action = PhoneTools.Action.other("Opened a new event"),
-            )
-            PhoneLaunch.Launch.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
-            PhoneLaunch.Launch.noApp -> PhoneTools.Result.failure("No calendar app on this phone can add events.")
+                }
+                val text = if (call.calendar == null) {
+                    opened
+                } else {
+                    "$opened The phone can’t choose the calendar in the form, so tell the user to pick “${call.calendar}” before saving."
+                }
+                PhoneTools.Result(text, action = PhoneTools.Action.other("Opened a new event"))
+            }
+            PhoneLaunch.Status.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
+            PhoneLaunch.Status.noApp -> PhoneTools.Result.failure("No calendar app on this phone can add events.")
         }
     }
 
@@ -131,7 +129,7 @@ internal object PhonePlaces {
         val begin = call.start.atZone(zone).toInstant().toEpochMilli()
         val end = call.end.atZone(zone).toInstant().toEpochMilli()
         val uri = CalendarContract.Instances.CONTENT_URI.buildUpon()
-        // Widen by a day each side so UTC-stored all-day events are never missed in any timezone.
+        // All-day events sit on UTC midnights, up to a day from local ones.
         ContentUris.appendId(uri, begin - DAY_MILLIS)
         ContentUris.appendId(uri, end + DAY_MILLIS)
         val events = mutableListOf<JsonObject>()
@@ -148,7 +146,7 @@ internal object PhonePlaces {
                 CalendarContract.Instances.EVENT_ID,
                 CalendarContract.Instances.DESCRIPTION,
                 CalendarContract.Instances.EVENT_TIMEZONE,
-                CalendarContract.Instances.OWNER_ACCOUNT,
+                CalendarContract.Events.ACCOUNT_NAME,
                 CalendarContract.Instances.ORGANIZER,
                 CalendarContract.Instances.RRULE,
                 CalendarContract.Instances.AVAILABILITY,
@@ -164,7 +162,7 @@ internal object PhonePlaces {
                 val rowBegin = cursor.getLong(1)
                 val rowEnd = cursor.getLong(2)
                 val allDay = cursor.getInt(3) == 1
-                if (!instanceInRange(rowBegin, rowEnd, allDay, call.start, call.end, begin, end)) continue
+                if (!instanceInRange(rowBegin, rowEnd, allDay, call.start, call.end, zone)) continue
                 total += 1
                 if (events.size >= MAX_EVENTS) continue
                 // All-day instances are stored at UTC midnights.
@@ -214,14 +212,17 @@ internal object PhonePlaces {
         return PhoneTools.Result(JsonObject(result).toString())
     }
 
+    /**
+     * Whether an instance from [rowBegin] to [rowEnd] falls in [rangeStart, rangeEnd): an all-day
+     * one by its calendar days, a timed one by its instant, so an event at midnight lands on one day only.
+     */
     internal fun instanceInRange(
         rowBegin: Long,
         rowEnd: Long,
         allDay: Boolean,
         rangeStart: LocalDateTime,
         rangeEnd: LocalDateTime,
-        beginMillis: Long,
-        endMillis: Long,
+        zone: ZoneId,
     ): Boolean {
         if (allDay) {
             val eventStart = Instant.ofEpochMilli(rowBegin).atOffset(ZoneOffset.UTC).toLocalDate()
@@ -231,8 +232,10 @@ internal object PhonePlaces {
             val queryEnd = if (rangeEnd.toLocalTime() == LocalTime.MIDNIGHT) rangeEnd.toLocalDate() else rangeEnd.toLocalDate().plusDays(1)
             return eventStart.isBefore(queryEnd) && eventEnd.isAfter(queryStart)
         }
-        if (rowBegin == rowEnd) return rowBegin in beginMillis..endMillis
-        return rowBegin < endMillis && rowEnd > beginMillis
+        val begin = rangeStart.atZone(zone).toInstant().toEpochMilli()
+        val end = rangeEnd.atZone(zone).toInstant().toEpochMilli()
+        if (rowBegin == rowEnd) return rowBegin >= begin && rowBegin < end
+        return rowBegin < end && rowEnd > begin
     }
 
     private fun response(status: Int): String? = when (status) {
@@ -309,35 +312,35 @@ internal object PhonePlaces {
                 "bicycling" -> "cycling"
                 else -> "driving"
             }
-            val chooser = PhoneLaunch.isChooser(intent)
-            val app = PhoneLaunch.handlerName(intent) ?: "Maps"
-            when (PhoneLaunch.start(intent)) {
-                PhoneLaunch.Launch.started -> return PhoneTools.Result(
-                    if (chooser) {
+            val launch = PhoneLaunch.start(intent)
+            val app = launch.app ?: "Maps"
+            when (launch.status) {
+                PhoneLaunch.Status.started -> return PhoneTools.Result(
+                    if (launch.chooser) {
                         "The phone is asking the user which app to open $kind directions to “${call.place}” with."
                     } else {
                         "Opened $kind directions to “${call.place}” in $app."
                     },
                     action = PhoneTools.Action.other("Opened directions"),
                 )
-                PhoneLaunch.Launch.blocked -> return PhoneTools.Result.failure(PhoneTools.BLOCKED)
+                PhoneLaunch.Status.blocked -> return PhoneTools.Result.failure(PhoneTools.BLOCKED)
                 // Other maps apps don't take the URL: show the place instead.
-                PhoneLaunch.Launch.noApp -> Unit
+                PhoneLaunch.Status.noApp -> Unit
             }
         }
-        val chooser = PhoneLaunch.isChooser(search)
-        val app = PhoneLaunch.handlerName(search) ?: "Maps"
-        return when (PhoneLaunch.start(search)) {
-            PhoneLaunch.Launch.started -> PhoneTools.Result(
-                if (chooser) {
+        val launch = PhoneLaunch.start(search)
+        val app = launch.app ?: "Maps"
+        return when (launch.status) {
+            PhoneLaunch.Status.started -> PhoneTools.Result(
+                if (launch.chooser) {
                     "The phone is asking the user which app to search for “${call.place}” with."
                 } else {
                     "Opened $app searching for “${call.place}”."
                 },
                 action = PhoneTools.Action.other("Opened Maps"),
             )
-            PhoneLaunch.Launch.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
-            PhoneLaunch.Launch.noApp -> PhoneTools.Result.failure("No maps app on this phone can show that.")
+            PhoneLaunch.Status.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
+            PhoneLaunch.Status.noApp -> PhoneTools.Result.failure("No maps app on this phone can show that.")
         }
     }
 
@@ -416,24 +419,20 @@ internal object PhonePlaces {
         return name
     }
 
+    /** The first fix any of [providers] gives; null once all of them gave none. */
     private suspend fun raceProviders(locations: LocationManager, providers: List<String>): Location? = coroutineScope {
-        val winner = CompletableDeferred<Location?>()
-        var pending = providers.size
-        val jobs = mutableListOf<kotlinx.coroutines.Job>()
+        val fixes = Channel<Location?>(providers.size)
+        val asks = mutableListOf<Job>()
         for (provider in providers) {
-            jobs += launch {
-                val found = current(locations, provider)
-                if (found != null) {
-                    winner.complete(found)
-                } else {
-                    pending -= 1
-                    if (pending <= 0) winner.complete(null)
-                }
-            }
+            asks += launch { fixes.send(current(locations, provider)) }
         }
-        val result = winner.await()
-        for (job in jobs) job.cancel()
-        result
+        var found: Location? = null
+        for (index in providers.indices) {
+            found = fixes.receive()
+            if (found != null) break
+        }
+        for (ask in asks) ask.cancel()
+        found
     }
 
     private suspend fun current(locations: LocationManager, provider: String): Location? =
@@ -487,7 +486,7 @@ internal object PhonePlaces {
         /** “Family, sam@example.com”, or the name alone when it is the account's own calendar. */
         val label: String get() {
             if (!syncs) return "$name, on this phone only"
-            if (name == account) return name
+            if (name == account || account.isBlank()) return name
             return "$name, $account"
         }
     }
@@ -525,36 +524,43 @@ internal object PhonePlaces {
      * The calendar a new event goes in. [wanted] names one by its name, its label or its account
      * (an account means its primary calendar). Without [wanted] it is the only account's primary
      * calendar, and a calendar kept on this phone only when no account has one. Null when
-     * [wanted] names none or several, or when several fit and none was named.
+     * [wanted] names none or several, when its name and account point at different calendars,
+     * or when several accounts fit and none was named.
      */
     internal fun pickCalendar(calendars: List<WritableCalendar>, wanted: String?): WritableCalendar? {
         if (wanted != null) {
             val named = mutableListOf<WritableCalendar>()
             val inAccount = mutableListOf<WritableCalendar>()
-            val primaryInAccount = mutableListOf<WritableCalendar>()
             for (calendar in calendars) {
                 if (calendar.name.equals(wanted, ignoreCase = true) || calendar.label.equals(wanted, ignoreCase = true)) {
                     named += calendar
                 }
-                if (calendar.account.equals(wanted, ignoreCase = true)) {
-                    inAccount += calendar
-                    if (calendar.primary) primaryInAccount += calendar
-                }
+                if (calendar.account.equals(wanted, ignoreCase = true)) inAccount += calendar
             }
-            if (named.isNotEmpty()) return named.singleOrNull()
-            if (primaryInAccount.isNotEmpty()) return primaryInAccount.singleOrNull()
-            return inAccount.singleOrNull()
+            if (named.isEmpty()) return accountCalendar(inAccount)
+            if (named.size > 1) return null
+            val only = named[0]
+            if (inAccount.isNotEmpty() && only !in inAccount) return null
+            return only
         }
-        val synced = mutableListOf<WritableCalendar>()
-        val primarySynced = mutableListOf<WritableCalendar>()
+        val accounts = mutableMapOf<String, MutableList<WritableCalendar>>()
         for (calendar in calendars) {
             if (!calendar.syncs) continue
-            synced += calendar
-            if (calendar.primary) primarySynced += calendar
+            accounts.getOrPut(calendar.account.lowercase()) { mutableListOf() } += calendar
         }
-        if (primarySynced.isNotEmpty()) return primarySynced.singleOrNull()
-        if (synced.isNotEmpty()) return synced.singleOrNull()
+        if (accounts.size > 1) return null
+        if (accounts.size == 1) return accountCalendar(accounts.values.first())
         return calendars.singleOrNull()
+    }
+
+    /** One account's calendar for a new event: its primary one, else its only one. */
+    private fun accountCalendar(inAccount: List<WritableCalendar>): WritableCalendar? {
+        val primary = mutableListOf<WritableCalendar>()
+        for (calendar in inAccount) {
+            if (calendar.primary) primary += calendar
+        }
+        if (primary.isNotEmpty()) return primary.singleOrNull()
+        return inAccount.singleOrNull()
     }
 
     /** What the model reads when [pickCalendar] found no single calendar: the choices to ask the user about. */

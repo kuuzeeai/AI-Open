@@ -94,15 +94,14 @@ class OpenCodeAssistantService : VoiceInteractionService() {
         private var current: WeakReference<OpenCodeAssistantService>? = null
         private const val unlockPoll = 250L
 
-        /** Active phone call modes where cellular audio holds the microphone and the phone UI is up. */
-        internal fun isPhoneCall(mode: Int): Boolean = mode == AudioManager.MODE_IN_CALL ||
+        private fun isPhoneCall(mode: Int): Boolean = mode == AudioManager.MODE_RINGTONE ||
+            mode == AudioManager.MODE_IN_CALL ||
             mode == AudioManager.MODE_CALL_SCREENING ||
             mode == AudioManager.MODE_CALL_REDIRECT
 
-        /** Active or ringing phone call (used to avoid popping an unlock prompt over an incoming call). */
-        internal fun isCallActiveOrRinging(context: Context): Boolean {
+        fun isPhoneCall(context: Context): Boolean {
             val mode = context.getSystemService(AudioManager::class.java)?.mode ?: return false
-            return mode == AudioManager.MODE_RINGTONE || isPhoneCall(mode)
+            return isPhoneCall(mode)
         }
 
         /** Opens the assistant's panel again, as a press of the side button would (after unlocking). */

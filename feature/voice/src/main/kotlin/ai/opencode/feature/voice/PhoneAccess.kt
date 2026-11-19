@@ -62,22 +62,18 @@ enum class PhoneAccess(val title: String, val permissions: List<String>) {
             doNotDisturb -> context.getSystemService(NotificationManager::class.java)?.isNotificationPolicyAccessGranted == true
             systemSettings -> Settings.System.canWrite(context)
             // Coarse location is enough to answer; fine only sharpens it.
-            location -> granted(context, Manifest.permission.ACCESS_COARSE_LOCATION).also { if (it) clearGranted(context, access.permissions) }
+            location -> granted(context, Manifest.permission.ACCESS_COARSE_LOCATION)
             else -> {
                 var all = true
                 for (permission in access.permissions) {
                     if (!granted(context, permission)) all = false
                 }
-                if (all) clearGranted(context, access.permissions)
                 all
             }
         }
 
-        fun granted(context: Context, permission: String): Boolean {
-            val ok = context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
-            if (ok) clearGranted(context, listOf(permission))
-            return ok
-        }
+        fun granted(context: Context, permission: String): Boolean =
+            context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
 
         /** Whether OpenCode is the phone's digital assistant (the assistant role). */
         fun isAssistant(context: Context): Boolean {
@@ -91,19 +87,20 @@ enum class PhoneAccess(val title: String, val permissions: List<String>) {
          * result to answer with: [PhoneTools.needsPermission] or [PhoneTools.permissionBlocked].
          */
         fun require(context: Context, permissions: List<String>, what: String): PhoneTools.Result? {
+            clearGranted(context, permissions)
             val missing = mutableListOf<String>()
             for (permission in permissions) {
                 if (!granted(context, permission)) missing += permission
             }
             if (missing.isEmpty()) return null
             if (isBlocked(missing)) {
-                return when (PhoneLaunch.start(appDetails(context))) {
-                    PhoneLaunch.Launch.started -> PhoneTools.Result.failure(PhoneTools.permissionBlocked(what))
+                return when (PhoneLaunch.start(appDetails(context)).status) {
+                    PhoneLaunch.Status.started -> PhoneTools.Result.failure(PhoneTools.permissionBlocked(what))
                     else -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
                 }
             }
-            return when (PhoneLaunch.start(PhonePermissionActivity.intent(context, missing))) {
-                PhoneLaunch.Launch.started -> PhoneTools.Result.failure(PhoneTools.needsPermission(what))
+            return when (PhoneLaunch.start(PhonePermissionActivity.intent(context, missing)).status) {
+                PhoneLaunch.Status.started -> PhoneTools.Result.failure(PhoneTools.needsPermission(what))
                 else -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
             }
         }
@@ -113,6 +110,7 @@ enum class PhoneAccess(val title: String, val permissions: List<String>) {
          * draft): asks for [permissions] for next time, unless Android won't show the dialog again.
          */
         fun askForNextTime(context: Context, permissions: List<String>) {
+            clearGranted(context, permissions)
             if (isBlocked(permissions)) return
             PhoneLaunch.start(PhonePermissionActivity.intent(context, permissions))
         }
@@ -125,8 +123,8 @@ enum class PhoneAccess(val title: String, val permissions: List<String>) {
                 systemSettings -> "access to modify system settings"
                 else -> "notification access"
             }
-            return when (PhoneLaunch.start(specialSettings(context, access))) {
-                PhoneLaunch.Launch.started -> PhoneTools.Result.failure(PhoneTools.needsAccess(name))
+            return when (PhoneLaunch.start(specialSettings(context, access)).status) {
+                PhoneLaunch.Status.started -> PhoneTools.Result.failure(PhoneTools.needsAccess(name))
                 else -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
             }
         }
@@ -181,7 +179,7 @@ enum class PhoneAccess(val title: String, val permissions: List<String>) {
             var changed = false
             val remaining = blocked.toMutableSet()
             for (permission in permissions) {
-                if (permission in remaining && context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+                if (permission in remaining && granted(context, permission)) {
                     remaining -= permission
                     changed = true
                 }
@@ -308,7 +306,10 @@ class PhoneUnlockActivity : Activity() {
  * start them while it's in the background, and an app on screen always may.
  */
 internal object PhoneLaunch {
-    enum class Launch { started, blocked, noApp }
+    enum class Status { started, blocked, noApp }
+
+    /** How a start went, with the [app] it opened (such as “Gmail”), or [chooser] when Android asks the user which app. */
+    class Launch(val status: Status, val app: String?, val chooser: Boolean)
 
     /** How many screens the tools have opened behind the lock screen, so a result can say so. */
     private val behindLock = AtomicInteger(0)
@@ -317,15 +318,18 @@ internal object PhoneLaunch {
 
     fun start(intent: Intent): Launch {
         val context = dependency(AppContext)
-        if (!mayStartActivities(context)) return Launch.blocked
+        val info = context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        val chooser = info?.activityInfo?.packageName == "android"
+        val app = if (info == null || chooser) null else info.loadLabel(context.packageManager).toString()
+        if (!mayStartActivities(context)) return Launch(Status.blocked, app, chooser)
         return try {
             context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            if (showsScreen(intent)) opened(context)
-            Launch.started
+            if (showsScreen(intent, chooser)) opened(context)
+            Launch(Status.started, app, chooser)
         } catch (_: ActivityNotFoundException) {
-            Launch.noApp
+            Launch(Status.noApp, app, chooser)
         } catch (_: SecurityException) {
-            Launch.noApp
+            Launch(Status.noApp, app, chooser)
         }
     }
 
@@ -351,26 +355,11 @@ internal object PhoneLaunch {
 
     /**
      * Whether [intent] puts a screen in front: not the Clock's skip-UI timers and alarms (unless
-     * several apps trigger Android's chooser), and not a phone call, whose screen shows over the lock screen.
+     * Android's [chooser] asks which app), and not a phone call, whose screen shows over the lock screen.
      */
-    private fun showsScreen(intent: Intent): Boolean {
-        if (intent.getBooleanExtra(AlarmClock.EXTRA_SKIP_UI, false)) return isChooser(intent)
+    private fun showsScreen(intent: Intent, chooser: Boolean): Boolean {
+        if (intent.getBooleanExtra(AlarmClock.EXTRA_SKIP_UI, false)) return chooser
         return intent.action != Intent.ACTION_CALL
-    }
-
-    /** Whether Android's chooser will ask the user which app to open [intent] with. */
-    fun isChooser(intent: Intent): Boolean {
-        val info = dependency(AppContext).packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
-        return info?.activityInfo?.packageName == "android"
-    }
-
-    /** The name of the app [intent] opens, such as “Gmail”; null when none does. */
-    fun handlerName(intent: Intent): String? {
-        val context = dependency(AppContext)
-        val info = context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) ?: return null
-        // The chooser stands in when several apps could; name none then.
-        if (info.activityInfo.packageName == "android") return null
-        return info.loadLabel(context.packageManager).toString()
     }
 
     /** The name of the app with [packageName], such as “Spotify”; the package name when Android won't say. */

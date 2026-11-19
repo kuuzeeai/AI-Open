@@ -98,21 +98,23 @@ internal object PhoneScreen {
         AppLog.app.info { "Screen read asked call=${call != null} sharing=${ScreenShare.isSharing(call)}" }
         if (call == null || assistEmptyFor != call) {
             val assist = dependency(AssistantPanelClient).readScreen()
-            val hasText = !assist?.info?.text.isNullOrBlank()
-            val hasShot = assist?.screenshot != null
-            if (assist != null && (hasText || hasShot)) {
-                AppLog.app.info { "Screen read source=assist text=$hasText screenshot=$hasShot" }
-                if (!hasText && assist.screenshot != null && isProtectedScreenshot(assist.screenshot)) {
-                    return protectedResult(assist.info)
+            val info = assist?.info
+            val screenshot = assist?.screenshot
+            val hasText = !info?.text.isNullOrBlank()
+            if (hasText || screenshot != null) {
+                AppLog.app.info { "Screen read source=assist text=$hasText screenshot=${screenshot != null}" }
+                if (!hasText && screenshot != null && isBlack(screenshot)) {
+                    return result(info, screenshot, PhoneTools.NO_SCREENSHOT, protectedNote(info))
                 }
-                return result(assist.info, assist.screenshot, PhoneTools.NO_SCREENSHOT)
+                return result(info, screenshot, PhoneTools.NO_SCREENSHOT)
             }
             if (call != null) assistEmptyFor = call
+            return shared(context, call, info)
         }
-        return shared(context, call)
+        return shared(context, call, null)
     }
 
-    private suspend fun shared(context: Context, call: UUID?): PhoneTools.Result {
+    private suspend fun shared(context: Context, call: UUID?, info: ScreenInfo?): PhoneTools.Result {
         if (ScreenShare.stoppedByUser(call)) return PhoneTools.Result.failure(PhoneTools.SCREEN_STOPPED_BY_USER)
         if (!ScreenShare.isSharing(call)) {
             val asked = ask(context, call)
@@ -129,7 +131,7 @@ internal object PhoneScreen {
             return PhoneTools.Result.failure(PhoneTools.SCREEN_FAILED)
         }
         AppLog.app.info { "Screen read source=share" }
-        return result(null, frame, null)
+        return result(info, frame, null)
     }
 
     /** Shows Android's prompt and waits for the share to start; null once it has. */
@@ -137,8 +139,11 @@ internal object PhoneScreen {
         val consent = ScreenShare.expect(call)
         // The panel mustn't cover the prompt's buttons.
         dependency(AssistantPanelClient).showedScreen()
-        val launch = PhoneLaunch.start(Intent(context, ScreenShareActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION))
-        if (launch != PhoneLaunch.Launch.started) {
+        val intent = Intent(context, ScreenShareActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
+            .putExtra(ScreenShareActivity.EXTRA_CONSENT, consent.id)
+        val launch = PhoneLaunch.start(intent)
+        if (launch.status != PhoneLaunch.Status.started) {
             AppLog.app.notice("Screen share prompt blocked")
             ScreenShare.forget(consent)
             return PhoneTools.Result.failure(PhoneTools.SCREEN_PROMPT_BLOCKED)
@@ -175,16 +180,20 @@ internal object PhoneScreen {
      * second item; the server turns a JSON text result into an object for the model. A missing
      * part says why, so the model never guesses.
      */
-    private fun result(info: ScreenInfo?, screenshot: Bitmap?, noScreenshot: String?): PhoneTools.Result {
+    private fun result(info: ScreenInfo?, screenshot: Bitmap?, noScreenshot: String?, note: String? = null): PhoneTools.Result {
         val jpeg = screenshot?.let { jpeg(it) }
         val fields = mapOf(
             "app" to PhoneDetails.string(info?.app),
             "package" to PhoneDetails.string(info?.packageName),
             "activity" to PhoneDetails.string(info?.activity),
             "url" to PhoneDetails.string(info?.url),
-            "text" to PhoneDetails.string(PhoneDetails.cap(info?.text?.ifBlank { null }, MAX_LENGTH)),
+            "text" to PhoneDetails.string(PhoneDetails.cap(info?.text, MAX_LENGTH)),
             "screenshot" to if (jpeg == null && noScreenshot != null) JsonPrimitive(noScreenshot) else null,
-            "note" to if (info == null || info.text.isBlank()) JsonPrimitive(PhoneTools.SCREEN_ONLY_PICTURE) else null,
+            "note" to when {
+                note != null -> JsonPrimitive(note)
+                info == null || info.text.isBlank() -> JsonPrimitive(PhoneTools.SCREEN_ONLY_PICTURE)
+                else -> null
+            },
         )
         return PhoneTools.Result(
             PhoneDetails.json(fields),
@@ -194,26 +203,26 @@ internal object PhoneScreen {
     }
 
     /**
-     * Android returns a black screenshot (with only the status bar drawn) for FLAG_SECURE windows
-     * such as incognito tabs or banking apps. Sample the content region to detect that case.
+     * Whether the screen's body (below the status bar) is pure black: Android draws a window with
+     * FLAG_SECURE (an incognito tab, a banking app) that way, but so can a dark video or wallpaper.
      */
-    internal fun isProtectedScreenshot(bitmap: Bitmap): Boolean {
+    internal fun isBlack(bitmap: Bitmap): Boolean {
         val width = bitmap.width
         val height = bitmap.height
         if (width < 20 || height < 20) return false
+        val pixels = if (bitmap.config == Bitmap.Config.HARDWARE) bitmap.copy(Bitmap.Config.ARGB_8888, false) else bitmap
+        if (pixels == null) return false
         val startX = (width * 0.1f).toInt()
         val endX = (width * 0.9f).toInt()
         val startY = (height * 0.15f).toInt()
         val endY = (height * 0.85f).toInt()
-        val cols = 8
-        val rows = 10
-        val stepX = max(1, (endX - startX) / cols)
-        val stepY = max(1, (endY - startY) / rows)
+        val stepX = max(1, (endX - startX) / 8)
+        val stepY = max(1, (endY - startY) / 10)
         var y = startY
         while (y <= endY) {
             var x = startX
             while (x <= endX) {
-                if ((bitmap.getPixel(x, y) and 0x00FFFFFF) != 0) return false
+                if ((pixels.getPixel(x, y) and 0x00FFFFFF) != 0) return false
                 x += stepX
             }
             y += stepY
@@ -221,22 +230,9 @@ internal object PhoneScreen {
         return true
     }
 
-    private fun protectedResult(info: ScreenInfo?): PhoneTools.Result {
-        val app = info?.app
-        val sentence = if (app != null) {
-            "$app hides this screen from screenshots and screen reading (for example, an incognito tab or a protected page), so OpenCode can’t read it."
-        } else {
-            "The app on screen hides its content from screenshots and screen reading (for example, an incognito tab or a banking app), so OpenCode can’t read it."
-        }
-        val fields = mapOf(
-            "app" to PhoneDetails.string(info?.app),
-            "package" to PhoneDetails.string(info?.packageName),
-            "activity" to PhoneDetails.string(info?.activity),
-            "url" to PhoneDetails.string(info?.url),
-        )
-        val compact = PhoneDetails.compact(fields)
-        val message = if (compact.isEmpty()) sentence else PhoneDetails.text(sentence, compact)
-        return PhoneTools.Result.failure(message)
+    private fun protectedNote(info: ScreenInfo?): String {
+        val app = info?.app ?: "The app on screen"
+        return "The screen came back black with no text. $app may hide its content from screenshots and screen reading (for example, an incognito tab or a banking app), or the screen may really be dark."
     }
 
     /** Scaled down to [SCREEN_LONG_SIDE], so a read never sends more than the model needs. */
@@ -267,6 +263,7 @@ internal object ScreenShare {
 
     /** One showing of Android's prompt: it [opened], then the user answered. */
     class Consent(val call: UUID?) {
+        val id: String = UUID.randomUUID().toString()
         val opened = CompletableDeferred<Unit>()
         val answer = CompletableDeferred<Answer>()
     }
@@ -307,12 +304,16 @@ internal object ScreenShare {
         asking?.close()
     }
 
-    fun promptOpened(activity: ScreenShareActivity) {
+    /** False when the read already gave up on consent [id], so its prompt shouldn't show. */
+    fun promptOpened(activity: ScreenShareActivity, id: String?): Boolean {
         val asked = synchronized(lock) {
+            val current = consent
+            if (current == null || current.id != id) return false
             prompt = WeakReference(activity)
-            consent
+            current
         }
-        asked?.opened?.complete(Unit)
+        asked.opened.complete(Unit)
+        return true
     }
 
     fun promptClosed(activity: ScreenShareActivity) {
@@ -331,8 +332,9 @@ internal object ScreenShare {
     }
 
     /** The user answered Android's prompt. A yes starts the share's foreground service, which [start]s it. */
-    fun answered(context: Context, resultCode: Int, data: Intent?) {
-        val asked = synchronized(lock) { consent }
+    /** The user answered the prompt for consent [id]; an answer for a prompt already given up on is dropped. */
+    fun answered(context: Context, id: String?, resultCode: Int, data: Intent?) {
+        val asked = synchronized(lock) { consent?.takeIf { it.id == id } } ?: return
         if (resultCode != Activity.RESULT_OK || data == null) {
             AppLog.app.info("Screen share declined")
             finish(asked, Answer.declined)
@@ -536,15 +538,21 @@ internal object ScreenShare {
  */
 class ScreenShareActivity : Activity() {
     private var answered = false
+    private var consent: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        ScreenShare.promptOpened(this)
+        consent = intent.getStringExtra(EXTRA_CONSENT)
+        if (!ScreenShare.promptOpened(this, consent)) {
+            answered = true
+            finish()
+            return
+        }
         if (savedInstanceState != null) return
         val manager = getSystemService(MediaProjectionManager::class.java)
         if (manager == null) {
             answered = true
-            ScreenShare.answered(this, RESULT_CANCELED, null)
+            ScreenShare.answered(this, consent, RESULT_CANCELED, null)
             finish()
             return
         }
@@ -563,7 +571,7 @@ class ScreenShareActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST) {
             answered = true
-            ScreenShare.answered(applicationContext, resultCode, data)
+            ScreenShare.answered(applicationContext, consent, resultCode, data)
         }
         finish()
     }
@@ -577,14 +585,15 @@ class ScreenShareActivity : Activity() {
 
     override fun onDestroy() {
         if (!answered && !isChangingConfigurations) {
-            ScreenShare.answered(applicationContext, RESULT_CANCELED, null)
+            ScreenShare.answered(applicationContext, consent, RESULT_CANCELED, null)
         }
         ScreenShare.promptClosed(this)
         super.onDestroy()
     }
 
-    private companion object {
-        const val REQUEST = 1
+    companion object {
+        const val EXTRA_CONSENT = "consent"
+        private const val REQUEST = 1
     }
 }
 

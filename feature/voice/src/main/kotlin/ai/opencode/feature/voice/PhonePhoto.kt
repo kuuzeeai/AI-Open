@@ -45,10 +45,10 @@ internal object PhonePhoto {
         // The panel mustn't cover the camera's shutter button.
         dependency(AssistantPanelClient).showedScreen()
         try {
-            when (PhoneLaunch.start(Intent(context, PhonePhotoActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION))) {
-                PhoneLaunch.Launch.started -> {}
-                PhoneLaunch.Launch.blocked -> return PhoneTools.Result.failure(PhoneTools.BLOCKED)
-                PhoneLaunch.Launch.noApp -> return PhoneTools.Result.failure(NO_CAMERA)
+            when (PhoneLaunch.start(Intent(context, PhonePhotoActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)).status) {
+                PhoneLaunch.Status.started -> {}
+                PhoneLaunch.Status.blocked -> return PhoneTools.Result.failure(PhoneTools.BLOCKED)
+                PhoneLaunch.Status.noApp -> return PhoneTools.Result.failure(NO_CAMERA)
             }
             val result = waiting.await()
             if (result == RESULT_NO_CAMERA) return PhoneTools.Result.failure(NO_CAMERA)

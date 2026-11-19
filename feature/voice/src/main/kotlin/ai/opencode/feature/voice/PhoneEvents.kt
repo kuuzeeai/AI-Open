@@ -311,18 +311,17 @@ internal object PhoneEvents {
         var intent = Intent(Intent.ACTION_EDIT, uri)
         if (id.occurrence != null) intent.putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, id.occurrence)
         var launch = PhoneLaunch.start(intent)
-        if (launch == PhoneLaunch.Launch.noApp) {
+        if (launch.status == PhoneLaunch.Status.noApp) {
             // Some calendar apps only show an event; editing is a tap away there.
             intent = Intent(Intent.ACTION_VIEW, uri)
             if (id.occurrence != null) intent.putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, id.occurrence)
             launch = PhoneLaunch.start(intent)
         }
-        val chooser = PhoneLaunch.isChooser(intent)
-        return when (launch) {
-            PhoneLaunch.Launch.started -> {
+        return when (launch.status) {
+            PhoneLaunch.Status.started -> {
                 PhoneAccess.askForNextTime(context, PhoneAccess.calendar.permissions)
-                val app = PhoneLaunch.handlerName(intent) ?: "the calendar app"
-                val text = if (chooser) {
+                val app = launch.app ?: "the calendar app"
+                val text = if (launch.chooser) {
                     "OpenCode doesn’t have calendar access, so the phone is asking the user which calendar app to open the event with. " +
                         "Nothing has changed yet. The phone is asking the user to allow calendar access."
                 } else {
@@ -334,8 +333,8 @@ internal object PhoneEvents {
                     action = PhoneTools.Action.other("Opened the event"),
                 )
             }
-            PhoneLaunch.Launch.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
-            PhoneLaunch.Launch.noApp -> PhoneTools.Result.failure("No calendar app on this phone can open events.")
+            PhoneLaunch.Status.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
+            PhoneLaunch.Status.noApp -> PhoneTools.Result.failure("No calendar app on this phone can open events.")
         }
     }
 

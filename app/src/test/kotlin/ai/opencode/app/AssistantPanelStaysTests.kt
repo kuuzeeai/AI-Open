@@ -1,12 +1,10 @@
 package ai.opencode.app
 
 import ai.opencode.app.assistant.AssistantFlow
-import ai.opencode.app.assistant.OpenCodeAssistantService
 import ai.opencode.core.dependencies.withDependencies
 import ai.opencode.core.testing.TestIsolationRule
 import ai.opencode.feature.voice.AssistantCallPanel
 import ai.opencode.feature.voice.VoiceCallCommands
-import android.media.AudioManager
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -64,12 +62,5 @@ class AssistantPanelStaysTests {
         advanceTimeBy(5_000)
         runCurrent()
         assertTrue(flow.state.value.finished)
-    }
-
-    @Test
-    fun ringingCallDoesNotBlockAssistant() {
-        assertFalse(OpenCodeAssistantService.isPhoneCall(AudioManager.MODE_RINGTONE))
-        assertTrue(OpenCodeAssistantService.isPhoneCall(AudioManager.MODE_IN_CALL))
-        assertTrue(OpenCodeAssistantService.isPhoneCall(AudioManager.MODE_CALL_SCREENING))
     }
 }

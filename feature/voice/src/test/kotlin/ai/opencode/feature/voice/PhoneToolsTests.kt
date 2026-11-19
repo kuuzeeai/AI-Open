@@ -837,39 +837,55 @@ class PhoneToolsTests {
         val chicago = java.time.ZoneId.of("America/Chicago")
         val chiStart = java.time.LocalDateTime.of(2026, 11, 18, 0, 0)
         val chiEnd = java.time.LocalDateTime.of(2026, 11, 19, 0, 0)
-        val chiBegin = chiStart.atZone(chicago).toInstant().toEpochMilli()
-        val chiEndMs = chiEnd.atZone(chicago).toInstant().toEpochMilli()
-        assertTrue(PhonePlaces.instanceInRange(nov18Utc, nov19Utc, true, chiStart, chiEnd, chiBegin, chiEndMs))
-        assertFalse(PhonePlaces.instanceInRange(nov19Utc, nov20Utc, true, chiStart, chiEnd, chiBegin, chiEndMs))
+        assertTrue(PhonePlaces.instanceInRange(nov18Utc, nov19Utc, true, chiStart, chiEnd, chicago))
+        assertFalse(PhonePlaces.instanceInRange(nov19Utc, nov20Utc, true, chiStart, chiEnd, chicago))
 
         val tokyo = java.time.ZoneId.of("Asia/Tokyo")
         val tokStart = java.time.LocalDateTime.of(2026, 11, 19, 0, 0)
         val tokEnd = java.time.LocalDateTime.of(2026, 11, 19, 23, 59)
-        val tokBegin = tokStart.atZone(tokyo).toInstant().toEpochMilli()
-        val tokEndMs = tokEnd.atZone(tokyo).toInstant().toEpochMilli()
-        assertFalse(PhonePlaces.instanceInRange(nov18Utc, nov19Utc, true, tokStart, tokEnd, tokBegin, tokEndMs))
-        assertTrue(PhonePlaces.instanceInRange(nov19Utc, nov20Utc, true, tokStart, tokEnd, tokBegin, tokEndMs))
-        // Multi-day event spanning Nov 18..19 overlaps Nov 19.
-        assertTrue(PhonePlaces.instanceInRange(nov18Utc, nov20Utc, true, tokStart, tokEnd, tokBegin, tokEndMs))
+        assertFalse(PhonePlaces.instanceInRange(nov18Utc, nov19Utc, true, tokStart, tokEnd, tokyo))
+        assertTrue(PhonePlaces.instanceInRange(nov19Utc, nov20Utc, true, tokStart, tokEnd, tokyo))
+        assertTrue(PhonePlaces.instanceInRange(nov18Utc, nov20Utc, true, tokStart, tokEnd, tokyo))
     }
 
-    @Test fun brightnessUsesPerceptualScale() {
+    @Test fun aPointEventAtMidnightIsOnOneDayOnly() {
+        val chicago = java.time.ZoneId.of("America/Chicago")
+        val midnight = java.time.LocalDateTime.of(2026, 11, 19, 0, 0).atZone(chicago).toInstant().toEpochMilli()
+        val nov18 = java.time.LocalDateTime.of(2026, 11, 18, 0, 0)
+        val nov19 = java.time.LocalDateTime.of(2026, 11, 19, 0, 0)
+        val nov20 = java.time.LocalDateTime.of(2026, 11, 20, 0, 0)
+
+        assertFalse(PhonePlaces.instanceInRange(midnight, midnight, false, nov18, nov19, chicago))
+        assertTrue(PhonePlaces.instanceInRange(midnight, midnight, false, nov19, nov20, chicago))
+    }
+
+    @Test fun calendarsInSeveralAccountsNeedAName() {
+        val sam = PhonePlaces.WritableCalendar(4, "sam@example.com", "sam@example.com", syncs = true, primary = true)
+        val shared = PhonePlaces.WritableCalendar(30, "Team", "sam@work.example", syncs = true, primary = false)
+
+        assertNull(PhonePlaces.pickCalendar(listOf(sam, shared), null))
+        assertEquals(shared, PhonePlaces.pickCalendar(listOf(sam, shared), "Team"))
+    }
+
+    @Test fun aNameAndAnAccountPointingAtDifferentCalendarsIsAmbiguous() {
+        val named = PhonePlaces.WritableCalendar(5, "Work", "sam@example.com", syncs = true, primary = false)
+        val account = PhonePlaces.WritableCalendar(6, "Work calendar", "Work", syncs = true, primary = true)
+
+        assertNull(PhonePlaces.pickCalendar(listOf(named, account), "work"))
+        assertEquals("Work calendar", PhonePlaces.WritableCalendar(7, "Work calendar", "", syncs = true, primary = true).label)
+    }
+
+    @Test fun brightnessIsTheRawSettingLevel() {
         assertEquals(1, PhoneDisplay.percentToLevel(0))
-        assertEquals(0, PhoneDisplay.levelToPercent(1))
+        assertEquals(0, PhoneDisplay.levelToPercent(0))
+        assertEquals(128, PhoneDisplay.percentToLevel(50))
+        assertEquals(50, PhoneDisplay.levelToPercent(128))
         assertEquals(255, PhoneDisplay.percentToLevel(100))
         assertEquals(100, PhoneDisplay.levelToPercent(255))
-        // 50% on Android's perceptual slider is far lower than linear 128.
-        val half = PhoneDisplay.percentToLevel(50)
-        assertTrue(half in 18..28)
-        assertEquals(50, PhoneDisplay.levelToPercent(half))
-        // Linear 128 reads as ~87% on the perceptual slider.
-        assertTrue(PhoneDisplay.levelToPercent(128) in 85..89)
     }
 
-    @Test fun contactRelationsMatchCommonWords() {
-        assertTrue(android.provider.ContactsContract.CommonDataKinds.Relation.TYPE_MOTHER in PhonePeople.relationTypes("Mother"))
-        assertTrue(android.provider.ContactsContract.CommonDataKinds.Relation.TYPE_MOTHER in PhonePeople.relationTypes("mom"))
-        assertTrue(android.provider.ContactsContract.CommonDataKinds.Relation.TYPE_MANAGER in PhonePeople.relationTypes("Boss"))
-        assertTrue(PhonePeople.relationTypes("Jane").isEmpty())
+    @Test fun nicknameMatchesOnlyItself() {
+        assertEquals("Al", PhonePeople.likeExactly("Al"))
+        assertEquals("100\\% \\_x\\\\", PhonePeople.likeExactly("100% _x\\"))
     }
 }

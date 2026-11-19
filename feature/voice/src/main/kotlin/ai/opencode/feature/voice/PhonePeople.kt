@@ -63,30 +63,8 @@ internal object PhonePeople {
         resolver.query(
             ContactsContract.Data.CONTENT_URI,
             arrayOf(ContactsContract.Data.CONTACT_ID, ContactsContract.Data.DISPLAY_NAME_PRIMARY, ContactsContract.Data.STARRED),
-            "${ContactsContract.Data.MIMETYPE} = ? AND ${ContactsContract.CommonDataKinds.Nickname.NAME} LIKE ?",
-            arrayOf(ContactsContract.CommonDataKinds.Nickname.CONTENT_ITEM_TYPE, "%$query%"),
-            null,
-        )?.use { cursor -> collect(cursor) }
-        val relationMatches = relationTypes(query)
-        val relationSelection = StringBuilder(
-            "${ContactsContract.Data.MIMETYPE} = ? AND (${ContactsContract.CommonDataKinds.Relation.NAME} LIKE ? OR ${ContactsContract.CommonDataKinds.Relation.LABEL} LIKE ?",
-        )
-        val relationArgs = mutableListOf(
-            ContactsContract.CommonDataKinds.Relation.CONTENT_ITEM_TYPE,
-            "%$query%",
-            "%$query%",
-        )
-        if (relationMatches.isNotEmpty()) {
-            val placeholders = relationMatches.joinToString(", ") { "?" }
-            relationSelection.append(" OR ${ContactsContract.CommonDataKinds.Relation.TYPE} IN ($placeholders)")
-            for (type in relationMatches) relationArgs += type.toString()
-        }
-        relationSelection.append(")")
-        resolver.query(
-            ContactsContract.Data.CONTENT_URI,
-            arrayOf(ContactsContract.Data.CONTACT_ID, ContactsContract.Data.DISPLAY_NAME_PRIMARY, ContactsContract.Data.STARRED),
-            relationSelection.toString(),
-            relationArgs.toTypedArray(),
+            "${ContactsContract.Data.MIMETYPE} = ? AND ${ContactsContract.CommonDataKinds.Nickname.NAME} LIKE ? ESCAPE '\\'",
+            arrayOf(ContactsContract.CommonDataKinds.Nickname.CONTENT_ITEM_TYPE, likeExactly(query)),
             null,
         )?.use { cursor -> collect(cursor) }
         val ordered = mutableListOf<Long>()
@@ -259,19 +237,19 @@ internal object PhonePeople {
         if (call.notes != null) intent.putExtra(ContactsContract.Intents.Insert.NOTES, call.notes)
         // Back from the form returns to where the user was, not into the Contacts app.
         intent.putExtra("finishActivityOnSaveCompleted", true)
-        val chooser = PhoneLaunch.isChooser(intent)
-        val app = PhoneLaunch.handlerName(intent) ?: "Contacts"
-        return when (PhoneLaunch.start(intent)) {
-            PhoneLaunch.Launch.started -> PhoneTools.Result(
-                if (chooser) {
+        val launch = PhoneLaunch.start(intent)
+        val app = launch.app ?: "Contacts"
+        return when (launch.status) {
+            PhoneLaunch.Status.started -> PhoneTools.Result(
+                if (launch.chooser) {
                     "The phone is asking the user which contacts app to add “${call.contactName}” with. They pick an app, then tap Save; it isn’t saved yet."
                 } else {
                     "Opened $app with a new contact for “${call.contactName}” filled in. The user has to tap Save; it isn’t saved yet."
                 },
                 action = PhoneTools.Action.other("Opened a new contact"),
             )
-            PhoneLaunch.Launch.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
-            PhoneLaunch.Launch.noApp -> PhoneTools.Result.failure("No contacts app on this phone can add contacts.")
+            PhoneLaunch.Status.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
+            PhoneLaunch.Status.noApp -> PhoneTools.Result.failure("No contacts app on this phone can add contacts.")
         }
     }
 
@@ -295,21 +273,21 @@ internal object PhonePeople {
             if (!result.isError) PhoneAccess.askForNextTime(context, PhoneAccess.calls.permissions)
             return result
         }
-        return when (PhoneLaunch.start(Intent(Intent.ACTION_CALL, Uri.fromParts("tel", call.number, null)))) {
-            PhoneLaunch.Launch.started -> PhoneTools.Result(
+        return when (PhoneLaunch.start(Intent(Intent.ACTION_CALL, Uri.fromParts("tel", call.number, null))).status) {
+            PhoneLaunch.Status.started -> PhoneTools.Result(
                 "Calling ${who(call.contact, call.number)}.",
                 action = PhoneTools.Action.other("Calling ${call.contact ?: call.number}"),
             )
-            PhoneLaunch.Launch.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
-            PhoneLaunch.Launch.noApp -> PhoneTools.Result.failure("This phone can’t make phone calls.")
+            PhoneLaunch.Status.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
+            PhoneLaunch.Status.noApp -> PhoneTools.Result.failure("This phone can’t make phone calls.")
         }
     }
 
     private fun dial(number: String, success: String): PhoneTools.Result =
-        when (PhoneLaunch.start(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", number, null)))) {
-            PhoneLaunch.Launch.started -> PhoneTools.Result(success, action = PhoneTools.Action.other("Opened the dialer"))
-            PhoneLaunch.Launch.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
-            PhoneLaunch.Launch.noApp -> PhoneTools.Result.failure("This phone can’t make phone calls.")
+        when (PhoneLaunch.start(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", number, null))).status) {
+            PhoneLaunch.Status.started -> PhoneTools.Result(success, action = PhoneTools.Action.other("Opened the dialer"))
+            PhoneLaunch.Status.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
+            PhoneLaunch.Status.noApp -> PhoneTools.Result.failure("This phone can’t make phone calls.")
         }
 
     /** No card when [sendText] would only open a draft (or can't text at all). */
@@ -333,16 +311,14 @@ internal object PhonePeople {
             return draftText(
                 call.to,
                 call.message,
-                "OpenCode can send texts itself only while it’s the phone’s digital assistant, so it opened Messages with the text filled in instead. " +
-                    "The user has to tap send.",
+                "OpenCode can send texts itself only while it’s the phone’s digital assistant, so it drafted the text instead.",
             )
         }
         if (!PhoneAccess.granted(context, Manifest.permission.SEND_SMS)) {
             val result = draftText(
                 call.to,
                 call.message,
-                "OpenCode doesn’t have permission to send texts, so it opened Messages with the text filled in instead. " +
-                    "The user has to tap send. The phone is asking the user to allow texts.",
+                "OpenCode doesn’t have permission to send texts, so it drafted the text instead. The phone is asking the user to allow texts.",
             )
             if (!result.isError) PhoneAccess.askForNextTime(context, PhoneAccess.texts.permissions)
             return result
@@ -392,27 +368,26 @@ internal object PhonePeople {
         }
     }
 
-    /** Opens the messaging app filled in; [instead] replaces the usual answer. */
-    private fun draftText(to: String?, message: String?, instead: String?): PhoneTools.Result {
+    /** Opens the messaging app filled in; [why] comes first in the answer when the text wasn't sent itself. */
+    private fun draftText(to: String?, message: String?, why: String?): PhoneTools.Result {
         val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(to ?: "")))
         if (message != null) intent.putExtra("sms_body", message)
-        val chooser = PhoneLaunch.isChooser(intent)
-        val app = PhoneLaunch.handlerName(intent) ?: "Messages"
-        return when (PhoneLaunch.start(intent)) {
-            PhoneLaunch.Launch.started -> {
-                val text = if (instead != null) {
-                    instead
-                } else if (chooser) {
+        val launch = PhoneLaunch.start(intent)
+        val app = launch.app ?: "Messages"
+        return when (launch.status) {
+            PhoneLaunch.Status.started -> {
+                val opened = if (launch.chooser) {
                     "The phone is asking the user which messaging app to use for the text. They pick an app, then tap send."
                 } else if (to == null) {
                     "Opened $app with a text filled in. The user has to pick who it’s to and tap send."
                 } else {
                     "Opened $app with a text to $to filled in. The user has to tap send."
                 }
+                val text = if (why == null) opened else "$why $opened"
                 PhoneTools.Result(text, action = PhoneTools.Action.other("Drafted a text"))
             }
-            PhoneLaunch.Launch.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
-            PhoneLaunch.Launch.noApp -> PhoneTools.Result.failure("No app on this phone can send texts.")
+            PhoneLaunch.Status.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
+            PhoneLaunch.Status.noApp -> PhoneTools.Result.failure("No app on this phone can send texts.")
         }
     }
 
@@ -421,12 +396,12 @@ internal object PhonePeople {
         if (call.to != null) intent.putExtra(Intent.EXTRA_EMAIL, arrayOf(call.to))
         if (call.subject != null) intent.putExtra(Intent.EXTRA_SUBJECT, call.subject)
         if (call.body != null) intent.putExtra(Intent.EXTRA_TEXT, call.body)
-        val chooser = PhoneLaunch.isChooser(intent)
-        val app = PhoneLaunch.handlerName(intent) ?: "the email app"
-        return when (PhoneLaunch.start(intent)) {
-            PhoneLaunch.Launch.started -> {
+        val launch = PhoneLaunch.start(intent)
+        val app = launch.app ?: "the email app"
+        return when (launch.status) {
+            PhoneLaunch.Status.started -> {
                 val to = if (call.to == null) "" else " to ${call.to}"
-                val text = if (chooser) {
+                val text = if (launch.chooser) {
                     "The phone is asking the user which email app to use for an email$to. They pick an app, then tap send."
                 } else {
                     "Opened $app with an email$to filled in. The user has to tap send."
@@ -436,30 +411,19 @@ internal object PhonePeople {
                     action = PhoneTools.Action.other("Drafted an email"),
                 )
             }
-            PhoneLaunch.Launch.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
-            PhoneLaunch.Launch.noApp -> PhoneTools.Result.failure("No app on this phone can send email.")
+            PhoneLaunch.Status.blocked -> PhoneTools.Result.failure(PhoneTools.BLOCKED)
+            PhoneLaunch.Status.noApp -> PhoneTools.Result.failure("No app on this phone can send email.")
         }
     }
 
-    /** Maps spoken relationship words like “mom” or “boss” to Android's Relation types. */
-    internal fun relationTypes(query: String): List<Int> = when (query.trim().lowercase()) {
-        "mom", "mum", "mother", "mama" -> listOf(ContactsContract.CommonDataKinds.Relation.TYPE_MOTHER)
-        "dad", "father", "papa" -> listOf(ContactsContract.CommonDataKinds.Relation.TYPE_FATHER)
-        "parent" -> listOf(ContactsContract.CommonDataKinds.Relation.TYPE_PARENT)
-        "wife", "husband", "spouse" -> listOf(ContactsContract.CommonDataKinds.Relation.TYPE_SPOUSE)
-        "partner" -> listOf(
-            ContactsContract.CommonDataKinds.Relation.TYPE_PARTNER,
-            ContactsContract.CommonDataKinds.Relation.TYPE_DOMESTIC_PARTNER,
-        )
-        "sister" -> listOf(ContactsContract.CommonDataKinds.Relation.TYPE_SISTER)
-        "brother" -> listOf(ContactsContract.CommonDataKinds.Relation.TYPE_BROTHER)
-        "child", "son", "daughter" -> listOf(ContactsContract.CommonDataKinds.Relation.TYPE_CHILD)
-        "boss", "manager" -> listOf(ContactsContract.CommonDataKinds.Relation.TYPE_MANAGER)
-        "assistant" -> listOf(ContactsContract.CommonDataKinds.Relation.TYPE_ASSISTANT)
-        "friend" -> listOf(ContactsContract.CommonDataKinds.Relation.TYPE_FRIEND)
-        "relative" -> listOf(ContactsContract.CommonDataKinds.Relation.TYPE_RELATIVE)
-        "referred by" -> listOf(ContactsContract.CommonDataKinds.Relation.TYPE_REFERRED_BY)
-        else -> emptyList()
+    /** [text] as a LIKE pattern that matches only itself (case-insensitively), with `%`, `_` and `\` escaped. */
+    internal fun likeExactly(text: String): String {
+        val escaped = StringBuilder()
+        for (char in text) {
+            if (char == '%' || char == '_' || char == '\\') escaped.append('\\')
+            escaped.append(char)
+        }
+        return escaped.toString()
     }
 
     private fun who(name: String?, number: String): String = if (name == null) number else "$name ($number)"

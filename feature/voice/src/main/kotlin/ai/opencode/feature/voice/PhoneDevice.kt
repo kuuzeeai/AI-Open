@@ -46,6 +46,7 @@ internal object PhoneDevice {
     private const val MEDIA_SETTLE_MILLIS = 700L
     private const val MEDIA_WAIT_MILLIS = 2_500L
     private const val MEDIA_POLL_MILLIS = 100L
+    private const val DO_NOT_DISTURB_SETTLE_MILLIS = 150L
 
     fun flashlight(on: Boolean): PhoneTools.Result {
         val cameras = dependency(AppContext).getSystemService(CameraManager::class.java)
@@ -203,17 +204,16 @@ internal object PhoneDevice {
         val context = dependency(AppContext)
         PhoneAccess.requireSpecial(context, PhoneAccess.doNotDisturb)?.let { return it }
         val notifications = context.getSystemService(NotificationManager::class.java)
-            ?: return PhoneTools.Result.failure("This phone’s Do Not Disturb can’t be changed by apps.")
         // On, the user's own Do Not Disturb rules apply; off lets everything through.
         val filter = if (on) NotificationManager.INTERRUPTION_FILTER_PRIORITY else NotificationManager.INTERRUPTION_FILTER_ALL
         notifications.setInterruptionFilter(filter)
         var current = notifications.currentInterruptionFilter
-        if (isDoNotDisturbOn(current) != on) {
-            delay(150)
+        if (!isDoNotDisturb(current, on)) {
+            delay(DO_NOT_DISTURB_SETTLE_MILLIS)
             current = notifications.currentInterruptionFilter
         }
         val details = mapOf("lets_through" to JsonPrimitive(interruptions(current)))
-        if (isDoNotDisturbOn(current) != on) {
+        if (!isDoNotDisturb(current, on)) {
             val reason = if (!on) {
                 "Do Not Disturb is still on: Android only lets OpenCode turn off Do Not Disturb that OpenCode turned on itself. The user can turn it off in Quick Settings."
             } else {
@@ -225,8 +225,10 @@ internal object PhoneDevice {
         return PhoneTools.Result(PhoneDetails.text(text, details), action = PhoneTools.Action.other(text.removeSuffix(".")))
     }
 
-    private fun isDoNotDisturbOn(filter: Int): Boolean =
-        filter != NotificationManager.INTERRUPTION_FILTER_ALL && filter != NotificationManager.INTERRUPTION_FILTER_UNKNOWN
+    private fun isDoNotDisturb(filter: Int, on: Boolean): Boolean {
+        if (!on) return filter == NotificationManager.INTERRUPTION_FILTER_ALL
+        return filter != NotificationManager.INTERRUPTION_FILTER_ALL && filter != NotificationManager.INTERRUPTION_FILTER_UNKNOWN
+    }
 
     /**
      * Everything the phone tells apps about itself without asking: battery, power, network,
@@ -311,7 +313,7 @@ internal object PhoneDevice {
             "screen_brightness_percent" to PhoneDisplay.brightnessPercent(context)?.let { JsonPrimitive(it) },
             "auto_brightness" to autoBrightness?.let { JsonPrimitive(it) },
             "auto_rotate" to PhoneDisplay.autoRotate(context)?.let { JsonPrimitive(it) },
-            "screen_timeout_seconds" to PhoneDisplay.timeoutValue(context),
+            "screen_timeout_seconds" to PhoneDisplay.timeoutValue(PhoneDisplay.timeoutMillis(context)),
             "storage_free_gb" to storage?.let { JsonPrimitive(gigabytes(it.availableBytes)) },
             "storage_total_gb" to storage?.let { JsonPrimitive(gigabytes(it.totalBytes)) },
             "device" to JsonPrimitive("${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"),
@@ -418,8 +420,8 @@ internal object PhoneDevice {
             else -> listOf(Intent(Settings.ACTION_SETTINGS))
         }
         for ((index, intent) in intents.withIndex()) {
-            when (PhoneLaunch.start(intent)) {
-                PhoneLaunch.Launch.started -> {
+            when (PhoneLaunch.start(intent).status) {
+                PhoneLaunch.Status.started -> {
                     if (panel == "all") {
                         return PhoneTools.Result("Opened Settings. The user can change it there.", action = PhoneTools.Action.other("Opened Settings"))
                     }
@@ -429,8 +431,8 @@ internal object PhoneDevice {
                         action = PhoneTools.Action.other("Opened ${opened.replaceFirstChar { it.uppercase() }} settings"),
                     )
                 }
-                PhoneLaunch.Launch.blocked -> return PhoneTools.Result.failure(PhoneTools.BLOCKED)
-                PhoneLaunch.Launch.noApp -> continue
+                PhoneLaunch.Status.blocked -> return PhoneTools.Result.failure(PhoneTools.BLOCKED)
+                PhoneLaunch.Status.noApp -> continue
             }
         }
         return PhoneTools.Result.failure("This phone has no $name settings.")

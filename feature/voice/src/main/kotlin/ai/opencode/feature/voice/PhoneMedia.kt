@@ -84,20 +84,25 @@ internal object PhoneMedia {
 
     private suspend fun skip(session: MediaController, app: String, next: Boolean): PhoneTools.Result {
         val flag = if (next) PlaybackState.ACTION_SKIP_TO_NEXT else PlaybackState.ACTION_SKIP_TO_PREVIOUS
-        val actions = session.playbackState?.actions ?: 0L
-        if (actions != 0L && actions and flag == 0L) {
+        val state = session.playbackState
+        if (state != null && state.actions and flag == 0L) {
             return PhoneTools.Result.failure("$app doesn’t let other apps skip tracks.")
         }
         val wasPlaying = isPlaying(session)
         if (next) session.transportControls.skipToNext() else session.transportControls.skipToPrevious()
-        val done = if (next) "Skipped to the next track." else "Went back a track."
         if (wasPlaying) {
+            val done = if (next) "Skipped to the next track." else "Went back a track."
             val verb = if (next) "skip" else "go back"
             return settled(session, wantsPlaying = true, done, "Nothing is playing after asking $app to $verb: $NOTHING_READY")
         }
         delay(SETTLE_MILLIS)
+        val asked = if (next) "Asked $app to skip to the next track" else "Asked $app to go back a track"
+        val text = "$asked. It’s paused, so Android can’t show whether it did; now_playing is what it reports."
         val details = mapOf("now_playing" to PhoneDevice.nowPlaying())
-        return PhoneTools.Result(PhoneDetails.text(done, details), action = PhoneTools.Action.other(done.removeSuffix(".")))
+        return PhoneTools.Result(
+            PhoneDetails.text(text, details),
+            action = PhoneTools.Action.other(if (next) "Asked to skip" else "Asked to go back"),
+        )
     }
 
     /** Waits for the session to play (or stop playing), then answers with what's playing now. */
@@ -262,10 +267,10 @@ internal object PhoneMedia {
                 return PhoneTools.Result.failure("$app can’t be asked to play something by name. Open it with open_app and let the user pick.")
             }
             val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).setPackage(packageName).putExtras(extras)
-            when (PhoneLaunch.start(intent)) {
-                PhoneLaunch.Launch.started -> opened = true
-                PhoneLaunch.Launch.blocked -> return PhoneTools.Result.failure(PhoneTools.BLOCKED)
-                PhoneLaunch.Launch.noApp -> return PhoneTools.Result.failure("$app couldn’t take the request to play something. Open it with open_app instead.")
+            when (PhoneLaunch.start(intent).status) {
+                PhoneLaunch.Status.started -> opened = true
+                PhoneLaunch.Status.blocked -> return PhoneTools.Result.failure(PhoneTools.BLOCKED)
+                PhoneLaunch.Status.noApp -> return PhoneTools.Result.failure("$app couldn’t take the request to play something. Open it with open_app instead.")
             }
         }
 
