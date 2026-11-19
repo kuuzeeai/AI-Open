@@ -38,7 +38,7 @@ object TranscriptMetrics {
     /** `transcript.bubble.cornerRadius` default. */
     val bubbleCornerRadius: Dp = 24.dp
     /** Content surfaces: code, tables, cards, and images (`transcript.card.cornerRadius` default). */
-    val cardCorRadius: Dp = 20.dp
+    val cardCornerRadius: Dp = 20.dp
     /** Controls inside sheets and cards: choices and fields. */
     val controlCornerRadius: Dp = 12.dp
 
