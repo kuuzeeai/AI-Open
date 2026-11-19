@@ -1,6 +1,7 @@
 package ai.opencode.core.ui
 
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
@@ -14,12 +15,15 @@ import androidx.compose.ui.unit.dp
  * with [OpenCodeRadius] / [OpenCodeShape].
  * These are @Composable because Material3's toShape() requires it.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun cookie9Shape(): Shape = MaterialShapes.Cookie9Sided.toShape()
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun cookie12Shape(): Shape = MaterialShapes.Cookie12Sided.toShape()
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun sunnyShape(): Shape = MaterialShapes.Sunny.toShape()
 
