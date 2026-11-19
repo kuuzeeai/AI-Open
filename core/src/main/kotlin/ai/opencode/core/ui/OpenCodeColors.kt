@@ -118,16 +118,18 @@ class OpenCodeColors(
                     else -> v.canvas.mixedInOklab(v.text, tone).color
                 }
             }
+            // For System theme we don't have the dynamic scheme here; use tonal equivalents from the fixed palette.
+            // The DynamicSystemTheme.colors() will override these with the real dynamic values.
             val bubble = when {
-                    system -> scheme.primaryContainer
-                    highContrast -> v.surfaceStrong.color
-                    else -> v.accent.color
-                }
-                val onBubble = when {
-                    system -> scheme.onPrimaryContainer
-                    highContrast -> v.textStrong.color
-                    else -> v.accent.highContrastForeground.color
-                }
+                system -> v.canvas.mixedInOklab(v.accent, 0.22).color
+                highContrast -> v.surfaceStrong.color
+                else -> v.accent.color
+            }
+            val onBubble = when {
+                system -> v.accent.highContrastForeground.color
+                highContrast -> v.textStrong.color
+                else -> v.accent.highContrastForeground.color
+            }
             return OpenCodeColors(
                 theme = theme,
                 isDark = isDark,
