@@ -22,10 +22,27 @@ android {
             ?: ("0.1.0" + (providers.environmentVariable("OC_VERSION_SUFFIX").orNull?.let { "-$it" } ?: ""))
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
+    // Stable key for CI builds so each APK installs over the last one. Without the env vars
+    // (forks, local builds) the benchmark build falls back to the debug key.
+    signingConfigs {
+        create("ci") {
+            providers.environmentVariable("OC_KEYSTORE_PATH").orNull?.let { path ->
+                storeFile = file(path)
+                storePassword = providers.environmentVariable("OC_KEYSTORE_PASSWORD").orNull
+                keyAlias = providers.environmentVariable("OC_KEY_ALIAS").orNull
+                keyPassword = providers.environmentVariable("OC_KEY_PASSWORD").orNull
+            }
+        }
+    }
     // The release bundle is built unsigned; release.yml signs it with the Play upload key.
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
+            signingConfig = if (providers.environmentVariable("OC_KEYSTORE_PATH").isPresent) {
+                signingConfigs.getByName("ci")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
         release {
             // R8 is what makes Compose fast in release: it strips the debug-only paths, inlines
@@ -38,7 +55,11 @@ android {
             initWith(getByName("release"))
             matchingFallbacks += "release"
             applicationIdSuffix = ".benchmark"
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (providers.environmentVariable("OC_KEYSTORE_PATH").isPresent) {
+                signingConfigs.getByName("ci")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             isDebuggable = false
             isProfileable = true
         }
